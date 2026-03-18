@@ -97,7 +97,7 @@ class Config:
     # -- LLM -------------------------------------------------------------------
     LLM_ASSIST               = False
     LLM_MODEL                = "gpt-4o"
-    LLM_CONFIDENCE_THRESHOLD = 0.60
+    LLM_CONFIDENCE_THRESHOLD = 0.58
 
     # -- Trade thresholds ------------------------------------------------------
     MIN_VOLUME       = 5000
@@ -1257,7 +1257,8 @@ def execute_signal(
                     except Exception as _te:
                         log.debug(f"[Tracker] log_trade failed: {_te}")
                     with _tt.step("position_remove"):
-                        del open_positions[signal.market_ticker]
+                        if signal.market_ticker in open_positions:
+                            del open_positions[signal.market_ticker]
                         save_positions(open_positions)
                         save_pnl_log(pnl_log)
                     _tt.summary()
@@ -1775,7 +1776,7 @@ def run_bot():
             price_cache.evict_old()
 
             now_ts = time.time()
-            signal_cooldown = {}  # cooldown disabled — bot re-enters freely
+            # signal_cooldown preserved across cycles — do not reset
             watchlist_filtered = watchlist
 
             signals = run_strategies(watchlist_filtered, open_positions, total_pnl, pnl_log, daily_limit_hit or bot_paused, espn_cache=espn_cache)

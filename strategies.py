@@ -349,7 +349,7 @@ def strategy_value_fade(item, espn_cache=None):
     if conf < 0.63:
         return None
 
-    base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.no_bid,0.01)),Config.MAX_CONTRACTS))
+    base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.no_bid,0.15)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
 
     if m.yes_bid>=0.98: conf=min(conf+0.02, 0.72)
@@ -506,7 +506,7 @@ def strategy_prop_nba(item, espn_cache=None):
     # Hard floor
     if conf < 0.63: return None
     price_cents = int(m.yes_ask * 100)
-    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.01)), Config.MAX_CONTRACTS))
+    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.15)), Config.MAX_CONTRACTS))
     contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
     if ev < 0.12: return None
@@ -542,7 +542,7 @@ def strategy_mlb_underdog(item, espn_cache=None):
     conf = ctx.confidence
     if conf < 0.63: return None
     price_cents = int(m.yes_ask * 100)
-    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.01)), Config.MAX_CONTRACTS))
+    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.15)), Config.MAX_CONTRACTS))
     contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
     if ev < 0.08: return None  # spring training keeps lower EV bar
@@ -568,6 +568,7 @@ def strategy_exit(item, pos, espn_cache=None):
     contracts=pos["contracts"]; strategy=pos["strategy"]
     if entry==0: return None
     if side=="no": return None
+    if pos.get("is_bot") is False: return None  # never auto-exit manual positions
     bid=max(1,int(m.yes_bid*100))
     peak=max(bid,pos.get("peak_price",entry))
     pos["peak_price"]=peak
