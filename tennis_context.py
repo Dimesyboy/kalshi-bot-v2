@@ -157,19 +157,22 @@ def _fetch_h2h(p1_key: str, p2_key: str, p1_name: str, p2_name: str) -> str:
 def _parse_ticker_players(ticker: str) -> Tuple[str, str]:
     try:
         parts = ticker.split("-")
-        if len(parts) < 2:
+        if len(parts) < 3:
             return "", ""
-        event = parts[1]
-        date_match = re.match(r'^\d{1,2}[A-Z]{3}\d{2}', event)
-        player_part = event[date_match.end():] if date_match else event
-        if not player_part:
+        event_segment = parts[1]
+        import re as _re
+        date_match = _re.match(r"^\d{2}[A-Z]{3}\d{2}", event_segment)
+        if not date_match:
             return "", ""
-        mid = len(player_part) // 2
-        return player_part[:mid].upper(), player_part[mid:].upper()
+        p1 = event_segment[date_match.end():]
+        p2 = parts[2]
+        if not p1 or not p2:
+            return "", ""
+        log.debug(f"[Tennis] Parsed {ticker} -> P1={p1} P2={p2}")
+        return p1.upper(), p2.upper()
     except Exception as e:
         log.debug(f"[Tennis] Ticker parse error {ticker}: {e}")
         return "", ""
-
 
 def _name_matches_fragment(fragment: str, full_name: str) -> bool:
     if not fragment or not full_name:

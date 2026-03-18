@@ -4,10 +4,9 @@ from dataclasses import dataclass, field
 from typing import Optional
 log = logging.getLogger("kalshi_bot.espn")
 ESPN_URLS = {
-    "NBA":    "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
-    "MLB":    "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
-    "Tennis_ATP": "http://site.api.espn.com/apis/site/v2/sports/tennis/atp/scoreboard",
-    "Tennis_WTA": "http://site.api.espn.com/apis/site/v2/sports/tennis/wta/scoreboard",
+    "NBA": "http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard",
+    "MLB": "http://site.api.espn.com/apis/site/v2/sports/baseball/mlb/scoreboard",
+    # Tennis removed - data comes from api-tennis.com not ESPN
 }
 ESPN_TIMEOUT=8; ESPN_CACHE_TTL=45
 STATUS_LIVE="STATUS_IN_PROGRESS"; STATUS_FINAL="STATUS_FINAL"
