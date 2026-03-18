@@ -313,6 +313,11 @@ def get_tennis_context(ticker: str, espn_cache=None) -> Optional[TennisContext]:
     for match in live_matches:
         p1n = (match.get("event_first_player") or "").upper()
         p2n = (match.get("event_second_player") or "").upper()
+        # Both fragments must match something — prevents dead matches cross-firing
+        p1_hits = _name_matches_fragment(p1_frag, p1n) or _name_matches_fragment(p1_frag, p2n)
+        p2_hits = _name_matches_fragment(p2_frag, p2n) or _name_matches_fragment(p2_frag, p1n)
+        if not p1_hits or not p2_hits:
+            continue
         score = 0
         if _name_matches_fragment(p1_frag, p1n): score += 2
         if _name_matches_fragment(p2_frag, p2n): score += 2
@@ -321,7 +326,6 @@ def get_tennis_context(ticker: str, espn_cache=None) -> Optional[TennisContext]:
         if score > best_score:
             best_score = score
             best_match = match
-
     if not best_match or best_score < 3:
         log.debug(f"[Tennis] No match for {ticker} (frags={p1_frag}/{p2_frag} score={best_score})")
         return None
