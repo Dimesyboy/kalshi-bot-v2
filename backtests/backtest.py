@@ -1,33 +1,35 @@
-"""Simple backtester - load your real pnl_log.json and compute stats
-Run: python backtests/backtest.py
-Extend with historical Kalshi snapshots later for full strategy validation."""
 import json
-from datetime import datetime
 import math
+from datetime import datetime
 
 def analyze_pnl():
     try:
         with open("pnl_log.json") as f:
             data = json.load(f)
-    except FileNotFoundError:
-        print("No pnl_log.json yet - run the bot first!")
+    except:
+        print("No pnl_log.json yet — run the bot live first!")
         return
 
-    if not data:
-        print("Empty log")
+    profits = [float(entry.get("pnl_usd", 0)) for entry in data if "pnl_usd" in entry]
+    if not profits:
+        print("=== REAL TRADE BACKTEST SUMMARY ===")
+        print("No trades logged yet.")
+        print("Run the live bot (python kalshi_bot.py) to start collecting data!")
+        print("\nOnce you have trades, re-run this for win rate + PNL stats.")
         return
 
-    profits = [entry.get("pnl_usd", 0) for entry in data if "pnl_usd" in entry]
     wins = sum(1 for p in profits if p > 0)
     total_trades = len(profits)
+    total_pnl = sum(profits)
 
-    print("=== BACKTEST SUMMARY ===")
+    print("=== REAL TRADE BACKTEST SUMMARY ===")
     print(f"Total trades: {total_trades}")
-    print(f"Total PNL: ${sum(profits):.2f}")
+    print(f"Total PNL: ${total_pnl:.2f}")
     print(f"Win rate: {wins/total_trades*100:.1f}%")
-    print(f"Sharpe (rough): {sum(profits)/max(1, math.sqrt(total_trades)):.2f}")
-    print(f"Max daily loss seen: ${min(profits):.2f}")
-    print("\nReady to add historical Kalshi+ESPN replay here for true edge testing.")
+    print(f"Avg profit per trade: ${total_pnl/total_trades:.2f}")
+    print(f"Rough Sharpe: {total_pnl / max(1, math.sqrt(total_trades)):.2f}")
+    print(f"Biggest loser: ${min(profits):.2f}")
+    print("\nUse fetch_historical_candles.py to test strategies on PAST games!")
 
 if __name__ == "__main__":
     analyze_pnl()
