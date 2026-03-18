@@ -193,7 +193,7 @@ def _name_matches_fragment(fragment: str, full_name: str) -> bool:
     if not fragment or not full_name:
         return False
     # Require minimum fragment length to avoid false positives
-    if len(fragment) < 4:
+    if len(fragment) < 3:
         return False
     frag = fragment.upper()
     name = full_name.upper()
