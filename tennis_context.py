@@ -155,21 +155,36 @@ def _fetch_h2h(p1_key: str, p2_key: str, p1_name: str, p2_name: str) -> str:
 
 
 def _parse_ticker_players(ticker: str) -> Tuple[str, str]:
+    """
+    Kalshi tennis ticker format:
+    KXATPMATCH-26MAR17GUICAD-GUI
+    The middle segment after date = P1code+P2code concatenated
+    The last segment = P1code (3 chars)
+    So P1code = parts[2], P2code = middle[-(len(parts[2])):]
+    Example: GUICAD-GUI -> P1=GUI, P2=CAD
+    """
     try:
         parts = ticker.split("-")
         if len(parts) < 3:
             return "", ""
-        event_segment = parts[1]
+        event_segment = parts[1]  # e.g. 26MAR17GUICAD
+        p1_code = parts[2]        # e.g. GUI (always the last segment)
         import re as _re
         date_match = _re.match(r"^\d{2}[A-Z]{3}\d{2}", event_segment)
         if not date_match:
             return "", ""
-        p1 = event_segment[date_match.end():]
-        p2 = parts[2]
-        if not p1 or not p2:
+        combined = event_segment[date_match.end():]  # e.g. GUICAD
+        # P2 code is whatever is left after removing P1 code from combined
+        if combined.startswith(p1_code):
+            p2_code = combined[len(p1_code):]
+        else:
+            # fallback: split combined in half
+            mid = len(combined) // 2
+            p2_code = combined[mid:]
+        if not p1_code or not p2_code:
             return "", ""
-        log.debug(f"[Tennis] Parsed {ticker} -> P1={p1} P2={p2}")
-        return p1.upper(), p2.upper()
+        log.debug(f"[Tennis] Parsed {ticker} -> P1={p1_code} P2={p2_code}")
+        return p1_code.upper(), p2_code.upper()
     except Exception as e:
         log.debug(f"[Tennis] Ticker parse error {ticker}: {e}")
         return "", ""
