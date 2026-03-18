@@ -1,0 +1,21 @@
+# Secrets
+.env
+*.pem
+*.key
+
+# Logs & data
+*.log
+pnl_log.json
+espn_cache.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Backups
+*.bak
+*.old
+
+# Caches
+cache/

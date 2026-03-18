@@ -1,0 +1,7 @@
+kalshi-python
+python-dotenv
+requests
+python-telegram-bot
+openai
+PyYAML
+pytest

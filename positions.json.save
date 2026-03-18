@@ -1,0 +1,66 @@
+{
+  "KXNBASPREAD-26MAR14ORLMIA-ORL2": {
+    "side": "no",
+    "entry_price": 10,
+    "contracts": 500,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-15T02:09:21.267169",
+    "event_ticker": "KXNBASPREAD-26MAR14ORLMIA",
+    "reason": "Fading heavy favorite: yes_bid=90\u00a2"
+  },
+  "KXNBAGAME-26MAR16PHXBOS-BOS": {
+    "side": "yes",
+    "entry_price": 76,
+    "contracts": 65,
+    "strategy": "momentum",
+    "entry_time": "2026-03-15T02:09:21.267867",
+    "event_ticker": "KXNBAGAME-26MAR16PHXBOS",
+    "reason": "Momentum drift +6.0\u00a2 above bid"
+  },
+  "KXNBAGAME-26MAR15DALCLE-CLE": {
+    "side": "no",
+    "entry_price": 10,
+    "contracts": 500,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-15T02:09:21.268194",
+    "event_ticker": "KXNBAGAME-26MAR15DALCLE",
+    "reason": "Fading heavy favorite: yes_bid=90\u00a2"
+  },
+  "KXNBAGAME-26MAR14ORLMIA-ORL": {
+    "side": "no",
+    "entry_price": 5,
+    "contracts": 500,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-15T02:09:21.268776",
+    "event_ticker": "KXNBAGAME-26MAR14ORLMIA",
+    "reason": "Fading heavy favorite: yes_bid=95\u00a2"
+  },
+  "KXNBATOTAL-26MAR14ORLMIA-219": {
+    "side": "no",
+    "entry_price": 9,
+    "contracts": 500,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-15T02:10:27.244000",
+    "event_ticker": "KXNBATOTAL-26MAR14ORLMIA",
+    "reason": "Fading heavy favorite: yes_bid=91\u00a2"
+  },
+  "KXNBAGAME-26MAR14SACLAC-LAC": {
+    "side": "no",
+    "entry_price": 12,
+    "contracts": 416,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-15T02:11:33.069802",
+    "event_ticker": "KXNBAGAME-26MAR14SACLAC",
+    "reason": "Fading heavy favorite: yes_bid=88\u00a2"
+nan  },
+  "KXNBATOTAL-26MAR14DENLAL-247": {
+    "side": "yes",
+    "entry_price": 13,
+    "contracts": 384,
+    "strategy": "momentum",
+    "entry_time": "2026-03-15T02:11:33.071339",
+    "event_ticker": "KXNBATOTAL-26MAR14DENLAL",
+    "reason": "Momentum drift +8.0\u00a2 above bid"
+  }
+}
+nano 

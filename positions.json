@@ -1,0 +1,57 @@
+{
+  "KXWTAMATCH-26MAR17ARASEL-ARA": {
+    "side": "yes",
+    "entry_price": 30,
+    "contracts": 3,
+    "strategy": "tennis_underdog",
+    "entry_time": "2026-03-18T15:53:25.700937+00:00",
+    "event_ticker": "KXWTAMATCH-26MAR17ARASEL",
+    "reason": "Tennis underdog: A. Kucmova vs J. Niemeier [0-0] R430/330 H2H:Kucmova 0-0 Niemeier | sets_down=0 conf=0.63",
+    "entry_fee": 0.02,
+    "order_id": "fd57e130-a514-4ebc-8337-1345a8998d8c",
+    "is_bot": true,
+    "peak_price": 30,
+    "last_bid": 28
+  },
+  "KXATPMATCH-26MAR17SHAVAN-VAN": {
+    "side": "yes",
+    "entry_price": 36,
+    "contracts": 2,
+    "strategy": "tennis_underdog",
+    "entry_time": "2026-03-18T16:08:11.652004+00:00",
+    "event_ticker": "KXATPMATCH-26MAR17SHAVAN",
+    "reason": "Tennis underdog: J. Mikulskyte vs V. Paganetti [0-0] R251/415 H2H:Mikulskyte 0-0 Paganetti | sets_down=0 conf=0.63",
+    "entry_fee": 0.01,
+    "order_id": "56aa3acb-d8da-4b36-8a5f-4648dfb5dd54",
+    "is_bot": true,
+    "peak_price": 36,
+    "last_bid": 34
+  },
+  "KXATPCHALLENGERMATCH-26MAR18DEJHOU-HOU": {
+    "side": "yes",
+    "entry_price": 23,
+    "contracts": 4,
+    "strategy": "tennis_underdog",
+    "entry_time": "2026-03-18T16:12:49.842436+00:00",
+    "event_ticker": "KXATPCHALLENGERMATCH-26MAR18DEJHOU",
+    "reason": "Tennis underdog: J. De Jong vs M. Houkes [0-0] R91/251 H2H:Jong 0-0 Houkes | sets_down=0 conf=0.63",
+    "entry_fee": 0.02,
+    "order_id": "5e56ef16-d107-4849-87ca-1b02a7ee8845",
+    "is_bot": true,
+    "peak_price": 24,
+    "last_bid": 21
+  },
+  "KXNBAGAME-26MAR18OKCBKN-BKN": {
+    "side": "yes",
+    "entry_price": 6,
+    "peak_price": 6,
+    "last_bid": 5,
+    "contracts": 156,
+    "strategy": "manual",
+    "entry_time": "2026-03-18T16:14:43.900153Z",
+    "event_ticker": "KXNBAGAME-26MAR18OKCBKN",
+    "reason": "From fills",
+    "entry_fee": 0.62,
+    "is_bot": false
+  }
+}
