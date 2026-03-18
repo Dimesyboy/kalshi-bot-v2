@@ -230,6 +230,71 @@ class TradeSignal:
 
 # ==============================================================================
 
+# ==============================================================================
+# PRICE HISTORY CACHE
+# Tracks yes_bid per ticker across cycles to detect momentum and staleness
+# ==============================================================================
+
+class PriceHistoryCache:
+    MAX_HISTORY = 10
+
+    def __init__(self):
+        self._data: dict = {}
+
+    def update(self, ticker: str, yes_bid: float):
+        now = time.time()
+        if ticker not in self._data:
+            self._data[ticker] = []
+        self._data[ticker].append((now, yes_bid))
+        if len(self._data[ticker]) > self.MAX_HISTORY:
+            self._data[ticker] = self._data[ticker][-self.MAX_HISTORY:]
+
+    def get(self, ticker: str) -> dict:
+        h = self._data.get(ticker, [])
+        if not h:
+            return {"history": [], "cycles": 0, "delta_1": 0.0, "delta_3": 0.0,
+                    "direction": "flat", "cycles_above": 0, "is_fresh": True}
+        prices = [p for _, p in h]
+        current = prices[-1]
+        delta_1 = round((current - prices[-2]) * 100, 1) if len(prices) >= 2 else 0.0
+        delta_3 = round((current - prices[-4]) * 100, 1) if len(prices) >= 4 else 0.0
+        if delta_1 > 0.5:
+            direction = "rising"
+        elif delta_1 < -0.5:
+            direction = "falling"
+        else:
+            direction = "flat"
+        cycles_above = 0
+        for p in reversed(prices[:-1]):
+            if p >= current - 0.01:
+                cycles_above += 1
+            else:
+                break
+        is_fresh = cycles_above <= 2
+        return {
+            "history":      h,
+            "cycles":       len(h),
+            "delta_1":      delta_1,
+            "delta_3":      delta_3,
+            "direction":    direction,
+            "cycles_above": cycles_above,
+            "is_fresh":     is_fresh,
+        }
+
+    def enrich_watchlist(self, watchlist: list):
+        for item in watchlist:
+            ticker = item["market"].ticker
+            self.update(ticker, item["market"].yes_bid)
+            item["price_history"] = self.get(ticker)
+
+    def evict_old(self, max_age_secs: float = 3600):
+        now = time.time()
+        stale = [t for t, h in self._data.items()
+                 if h and now - h[-1][0] > max_age_secs]
+        for t in stale:
+            del self._data[t]
+
+
 # ATOMIC JSON I/O
 
 # ==============================================================================
@@ -1633,6 +1698,7 @@ def run_bot():
 
     last_hour           = datetime.now(timezone.utc).hour
     signal_cooldown     = {}
+    price_cache         = PriceHistoryCache()
     # Load persisted cooldowns
     try:
         import json as _j
@@ -1705,6 +1771,8 @@ def run_bot():
             ]
             _watcher.update_scan_tickers(all_tickers, signal_cooldown)
             watchlist = analyze_snapshot(snapshot)
+            price_cache.enrich_watchlist(watchlist)
+            price_cache.evict_old()
 
             now_ts = time.time()
             signal_cooldown = {}  # cooldown disabled — bot re-enters freely
