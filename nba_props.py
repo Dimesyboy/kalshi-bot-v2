@@ -35,7 +35,7 @@ try:
 except ImportError:
     _INJURIES = False
 
-BASE_URL  = "https://api.server.nbaapi.com/api"
+BASE_URL  = "https://api.pbpstats.com/get-totals/nba"
 TIMEOUT   = 10
 
 # Cache
@@ -92,17 +92,19 @@ def _fetch_all_players() -> Dict:
 
     try:
         # Fetch top 500 by points — covers all meaningful prop players
-        r = requests.get(f"{BASE_URL}/playertotals", params={
-            "season":   2025,
-            "sortBy":   "points",
-            "pageSize": 500,
+        r = requests.get(BASE_URL, params={
+            "Season":     "2024-25",
+            "SeasonType": "Regular Season",
+            "Type":       "Player",
+            "sortBy":     "points",
+            "pageSize":   500,
         }, timeout=TIMEOUT)
         r.raise_for_status()
-        data = r.json().get("data", [])
+        data = r.json().get("multi_row_table_data", [])
 
         out = {}
         for p in data:
-            name = p.get("playerName", "")
+            name = p.get("Name", "")
             if name:
                 out[name.upper()] = p
         _all_players    = out
@@ -134,8 +136,8 @@ def _fetch_pace() -> Dict:
         team_possession_rate: Dict[str, list] = {}
         for name, p in all_players.items():
             team = p.get("team", "")
-            total_mins = float(p.get("minutesPg", 0) or 0)  # total mins (mislabeled)
-            gp   = int(p.get("games", 0) or 0)
+            total_mins = float(p.get("Minutes", 0) or 0)  # total mins (mislabeled)
+            gp   = int(p.get("GamesPlayed", 0) or 0)
             fga  = float(p.get("fieldAttempts", 0) or 0)
             fta  = float(p.get("ftAttempts", 0) or 0)
             if not team or total_mins < 400 or gp < 20:
@@ -293,7 +295,7 @@ def _find_player(player_frag: str, prop_team: str, all_players: Dict,
     if team_abbrev:
         team_matches = [
             (n, s) for n, s in candidates
-            if s.get("team", "").upper() == team_abbrev
+            if s.get("TeamAbbreviation", "").upper() == team_abbrev
         ]
         if len(team_matches) == 1:
             return team_matches[0][1]
@@ -355,9 +357,9 @@ def get_nba_prop_context(ticker: str, yes_bid: float, espn_cache=None) -> Option
         log.debug(f"[NBA Props] No player match for {player_frag} ({prop_team})")
         return None
 
-    player_name = player.get("playerName", player_frag)
-    gp          = int(player.get("games", 0) or 0)
-    mins_total  = float(player.get("minutesPg", 0) or 0) / max(gp, 1)  # API returns total mins
+    player_name = player.get("Name", player_frag)
+    gp          = int(player.get("GamesPlayed", 0) or 0)
+    mins_total  = float(player.get("Minutes", 0) or 0) / max(gp, 1)  # API returns total mins
 
     if gp < 10:
         log.debug(f"[NBA Props] {player_name} only {gp} games — skipping")
@@ -365,11 +367,11 @@ def get_nba_prop_context(ticker: str, yes_bid: float, espn_cache=None) -> Option
 
     # Per-game averages
     if stat == "PTS":
-        total   = float(player.get("points", 0) or 0)
+        total   = float(player.get("Points", 0) or 0)
         avg_pg  = total / gp
         std_fac = 0.32   # pts has moderate variance
     else:  # 3PT
-        total   = float(player.get("threeFg", 0) or 0)
+        total   = float(player.get("FG3M", 0) or 0)
         avg_pg  = total / gp
         std_fac = 0.55   # 3PT has higher variance
 
