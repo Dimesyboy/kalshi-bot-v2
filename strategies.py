@@ -1,11 +1,14 @@
 from __future__ import annotations
+
 try:
     from nba_context import should_enter_prop, nba_value_fade_check, find_game_for_ticker
     _NBA_CTX=True
 except ImportError:
     _NBA_CTX=False
+
 import logging, time, math, requests, functools, os
 from typing import Optional
+
 log = logging.getLogger("kalshi_bot.strategies")
 
 try:
@@ -67,10 +70,40 @@ def _is_live(status, sport, ticker):
     return False
 
 def _scale_contracts(base_contracts, confidence, max_contracts=20):
-    """Scale position size by confidence above 0.60 floor.
-    Cap is applied AFTER scaling so MAX_CONTRACTS is always respected."""
-    scale = 1.0 + max(0.0, (confidence - 0.60) / 0.10) * 0.5
+    """Scale position size by confidence above 0.63 floor.
+    Tighter floor than before — only meaningful confidence gets a boost."""
+    scale = 1.0 + max(0.0, (confidence - 0.63) / 0.10) * 0.5
     return max(1, min(int(base_contracts * scale), max_contracts))
+
+# =============================================================================
+# Price history cache — used to detect stale 95c+ markets
+# Markets that have been at 95c+ for > 2 cycles are likely correctly priced
+# and should not be faded.
+# =============================================================================
+_price_history: dict = {}  # ticker -> {"first_seen_high": float, "last_price": float}
+_FADE_STALE_SECS = 120  # if market has been at 95c+ for 2+ minutes, skip
+
+def _record_price(ticker: str, yes_bid: float):
+    now = time.time()
+    if ticker not in _price_history:
+        _price_history[ticker] = {"first_seen_high": now if yes_bid >= 0.95 else None, "last_price": yes_bid}
+        return
+    h = _price_history[ticker]
+    if yes_bid >= 0.95:
+        if h["first_seen_high"] is None:
+            h["first_seen_high"] = now  # just crossed up
+    else:
+        h["first_seen_high"] = None  # dropped below — reset
+    h["last_price"] = yes_bid
+
+def _is_stale_high(ticker: str, yes_bid: float) -> bool:
+    """Returns True if this market has been at 95c+ for too long — price is correct, don't fade."""
+    _record_price(ticker, yes_bid)
+    h = _price_history.get(ticker)
+    if not h or h["first_seen_high"] is None:
+        return False
+    age = time.time() - h["first_seen_high"]
+    return age > _FADE_STALE_SECS
 
 class ESPNContextCache:
     def __init__(self): self._client=ESPNClient() if _ESPN else None; self._all={}; self._fetched=0.0
@@ -149,7 +182,6 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
             fills=_fetch_fills_raw_single(client)
             log.info(f"[Reconcile] Cycle: {len(fills)} recent fills")
     except Exception as e: log.warning(f"[Reconcile] failed:{e}"); return 0.0
-
     bot_orders=bot_orders or set()
     net={}
     for f in sorted(fills,key=lambda x:x.get('created_time','')):
@@ -183,10 +215,8 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
             elif action=='sell':
                 net[ticker]['net']-=count; net[ticker]['fees']+=fee
         except Exception as e: log.debug(f"[Reconcile] {e}")
-
     kt=set(t for t,v in net.items() if v['net']>0)
     log.info(f"[Reconcile] {len(kt)} tickers with net open position")
-
     for ticker,v in net.items():
         if v['net']<=0 or ticker in _settled_cache: continue
         side=v['side']; contracts=v['net']; entry=v['avg_entry']; fees=v['fees']
@@ -211,7 +241,6 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
             lc=open_positions[ticker].get('contracts',contracts)
             if lc!=contracts:
                 open_positions[ticker]['contracts']=contracts
-
     rm=[]
     for ticker,pos in list(open_positions.items()):
         if ticker in kt: continue
@@ -221,7 +250,6 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
             log.info(f"[Reconcile] {'SETTLED' if ms in ('settled','finalized') else 'CLOSED'}: {ticker}")
         except Exception as e: log.warning(f"[Reconcile] {ticker}:{e}")
         rm.append(ticker)
-
     for t in rm:
         if t in open_positions: del open_positions[t]
         _settled_cache.add(t)
@@ -236,10 +264,12 @@ def _ev(contracts, price_cents, confidence, is_maker=True):
 
 # =============================================================================
 # STRATEGY 1: Value Fade
-# Buy NO on heavy favorites (97c+)
-# Pre-game: NBA, MLB, Tennis
-# Live NBA/MLB: ALLOWED if ESPN confirms close game (lead < 8, Q1/Q2 only)
-# Live Tennis: ALLOWED if ESPN confirms match competitive
+# Buy NO on heavy favorites (95c+)
+# Guards:
+#   - Market must NOT have been at 95c+ for > 2 minutes (stale = correctly priced)
+#   - Live NBA/MLB: lead < 5 (tightened from 8), Q1/Q2 only
+#   - EV gate raised to 0.12 (from 0.08)
+#   - Confidence gate raised to 0.63 minimum
 # =============================================================================
 def strategy_value_fade(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
@@ -250,44 +280,51 @@ def strategy_value_fade(item, espn_cache=None):
     status=item.get("market_status","active")
     live=_is_live(status, sport, m.ticker)
 
-    if m.yes_bid < 0.95: return None  # lowered from 0.97 — matches manual trading edge
+    if m.yes_bid < 0.95: return None
+
     # Volume gates by market type
     if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 3000   # Q/H winner markets
+        min_vol = 3000
     elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 400    # Spring training — lower liquidity is normal
+        min_vol = 400
     else:
-        min_vol = 8000   # Full season NBA/MLB game markets
+        min_vol = 8000
+
     if m.volume < min_vol: return None
     if m.spread > 3: return None
 
     no_bid_cents=max(1,int(m.no_bid*100))
     if no_bid_cents < 5: return None
 
+    # Stale price guard — if market has been pinned at 95c+ for >2 min,
+    # the price is likely correct (blowout, game over, etc). Skip it.
+    if _is_stale_high(m.ticker, m.yes_bid):
+        log.debug(f"[value_fade] SKIP {m.ticker} — stale 95c+ price, not a fade opportunity")
+        return None
+
     conf=0.65
     ctx_reason="no context"
 
     if _is_nba_mlb(m.ticker):
-        if _is_prop(m.ticker): return None  # never fade props
+        if _is_prop(m.ticker): return None
         if live:
-            # Live NBA/MLB fade — only if ESPN confirms game is still close
             if not _NBA_CTX or not espn_cache:
-                return None  # refuse live NBA/MLB without context
+                return None
             ctx=find_game_for_ticker(m.ticker, espn_cache)
             if not ctx:
                 return None
             if not ctx.is_live:
                 return None
-            # Only fade in Q1 or Q2 — Q3/Q4 blowouts are real
+            # Only Q1 or Q2
             if ctx.nba_quarter > 2:
                 return None
-            # Only fade if lead is small — big lead means price is correct
-            if abs(ctx.lead) > 8:
+            # Tightened: lead must be < 5, not < 8
+            # Lead of 8 in Q1 is already meaningful in NBA — don't fade it
+            if abs(ctx.lead) > 5:
                 return None
             conf=0.66
             ctx_reason=f"Live Q{ctx.nba_quarter} lead={ctx.lead} — early game fade"
         else:
-            # Pre-game NBA/MLB
             if not _NBA_CTX or not espn_cache:
                 conf=0.65; ctx_reason="pre-game no ESPN"
             else:
@@ -299,15 +336,18 @@ def strategy_value_fade(item, espn_cache=None):
         if live and _TENNIS_CTX and espn_cache:
             tctx=get_tennis_context(m.ticker, espn_cache)
             if tctx:
-                # Only fade if match is competitive — not if one player is winning easily
                 if tctx.p1_sets > 1 or tctx.p2_sets > 1:
-                    return None  # match nearly over, price is correct
+                    return None
                 conf=min(0.68, tctx.underdog_conf)
                 ctx_reason=f"Tennis live fade: {tctx.summary()}"
             else:
                 conf=0.65; ctx_reason="tennis live no ctx"
         else:
             conf=0.65; ctx_reason="tennis pre-game"
+
+    # Hard confidence floor — must clear 0.63 to proceed
+    if conf < 0.63:
+        return None
 
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.no_bid,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
@@ -316,7 +356,8 @@ def strategy_value_fade(item, espn_cache=None):
     if m.yes_bid>=0.99: conf=min(conf+0.02, 0.74)
 
     ev=_ev(contracts,no_bid_cents,conf,is_maker=True)
-    if ev < 0.08: return None
+    # Raised EV gate from 0.08 to 0.12 — filters marginal fades
+    if ev < 0.12: return None
 
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
@@ -327,57 +368,42 @@ def strategy_value_fade(item, espn_cache=None):
     )
 
 # =============================================================================
-# STRATEGY 2: NBA/MLB Prop YES
-# Buy YES on player props where Kalshi price is below implied probability
-# Uses player season average vs threshold to find underpriced markets
-# Pre-game and early live (Q1/Q2, innings 1-3) only
+# STRATEGY 2: NBA/MLB Prop YES (disabled — kept for reference)
 # =============================================================================
 def strategy_prop_yes(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
     m=item["market"]
     if not _is_prop(m.ticker): return None
-
     sport=item.get("sport","")
     status=item.get("market_status","active")
     live=_is_live(status, sport, m.ticker)
-
-    # Price range: 62-78c — avoids fee-heavy 50c zone and overpriced locks
     if m.yes_bid < 0.62 or m.yes_bid > 0.78: return None
     if m.volume < 5000 or m.spread > 4: return None
-
-    # For live props, only enter in early game
     if live and espn_cache and _NBA_CTX:
         ctx=find_game_for_ticker(m.ticker, espn_cache)
         if ctx and ctx.is_live:
             if ctx.nba_quarter > 2:
-                return None  # too late — stat window closing
-            # Enough game elapsed to have meaningful stats — at least 3 min into Q1
+                return None
             try:
-                if ctx.clock_secs > 660:  # more than 11 min left in Q1 = too early
+                if ctx.clock_secs > 660:
                     return None
             except: pass
-
     conf=0.65
     ctx_reason="pre-game prop"
-
     if _NBA_CTX and espn_cache:
         enter,ctx_conf,ctx_reason=should_enter_prop(m.ticker, m.yes_bid, espn_cache)
         if not enter: return None
         conf=max(conf, ctx_conf)
     else:
-        if live: return None  # no live props without context
+        if live: return None
         ctx_reason="pre-game no ESPN"
-
-    # Require meaningful edge — price must suggest real probability
+    if conf < 0.63: return None
     if m.yes_bid < 0.62 and conf < 0.68: return None
-
     price_cents=int(m.yes_ask*100)
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
-
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.10: return None
-
+    if ev < 0.12: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -388,8 +414,6 @@ def strategy_prop_yes(item, espn_cache=None):
 
 # =============================================================================
 # STRATEGY 3: Tennis Live Underdog
-# Buy YES on underdog at 20-40c when ESPN confirms match still competitive
-# Requires tennis context — no blind entries
 # =============================================================================
 def strategy_tennis_underdog(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
@@ -397,39 +421,28 @@ def strategy_tennis_underdog(item, espn_cache=None):
     sport=item.get("sport","")
     if sport != "Tennis": return None
     if not _is_tennis(m.ticker): return None
-
     status=item.get("market_status","active")
     live=_is_live(status, sport, m.ticker)
-    if not live: return None  # live only — pre-game underdogs have no edge
-
+    if not live: return None
     if m.yes_bid < 0.20 or m.yes_bid > 0.38: return None
     if m.volume < 8000 or m.spread > 3: return None
-
-    # Require ESPN context — no blind underdog entries
     if not _TENNIS_CTX or not espn_cache:
         return None
-
     tctx=get_tennis_context(m.ticker, espn_cache)
     if not tctx or not tctx.is_live:
         return None
-
-    # Match must still be winnable — not down 2 sets in best of 3
     if tctx.sets_down >= 2:
         return None
-    # Not in a blowout set — current set must be close
     if abs(tctx.p1_games - tctx.p2_games) > 3:
         return None
-
     conf=tctx.underdog_conf
-    if conf < 0.60: return None  # context says no edge
-
+    # Hard floor — context must actually support the trade
+    if conf < 0.63: return None
     price_cents=int(m.yes_ask*100)
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
-
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.10: return None
-
+    if ev < 0.12: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -440,8 +453,6 @@ def strategy_tennis_underdog(item, espn_cache=None):
 
 # =============================================================================
 # STRATEGY 4: Quarter/Half Winner
-# Pre-game only, contested markets 40-60c
-# Less efficient than full-game — better odds on same information
 # =============================================================================
 def strategy_quarter_winner(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
@@ -450,30 +461,23 @@ def strategy_quarter_winner(item, espn_cache=None):
         "KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER",
         "KXNBA1HWINNER","KXNBA2HWINNER",
     ]): return None
-
     status=item.get("market_status","active")
-    if status != "open": return None  # pre-game only
-
-    # Truly contested — not a clear favorite
+    if status != "open": return None
     if m.yes_bid < 0.40 or m.yes_bid > 0.60: return None
-    # Lower volume gate for Q/H markets — naturally less liquid than full game
     if m.volume < 2000 or m.spread > 5: return None
-
     conf=0.60
     ctx_reason="pre-game Q/H"
-
     if _NBA_CTX and espn_cache:
         enter,ctx_conf,ctx_reason=nba_value_fade_check(m.ticker, m.yes_bid, espn_cache)
         if not enter: return None
         conf=max(conf, ctx_conf)
-
+    # Hard floor
+    if conf < 0.63: return None
     price_cents=int(m.yes_ask*100)
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
-
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.10: return None
-
+    if ev < 0.12: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -484,104 +488,78 @@ def strategy_quarter_winner(item, espn_cache=None):
 
 # =============================================================================
 # STRATEGY 5: NBA Player Props (Points + 3PT)
-# Uses season averages + hit rate model + pace adjustment
-# Pre-game and early live (Q1/Q2) only
 # =============================================================================
 def strategy_prop_nba(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
     m = item["market"]
-
-    # Only PTS and 3PT series
     if not any(m.ticker.startswith(s) for s in ["KXNBAPTS", "KXNBA3PT"]):
         return None
-
     status = item.get("market_status", "active")
-    sport  = item.get("sport", "")
-
-    # Price range: 55-80c — genuine probability zone
+    sport = item.get("sport", "")
     if m.yes_bid < 0.55 or m.yes_bid > 0.80: return None
     if m.volume < 5000 or m.spread > 5: return None
-
-    # Require NBA props module
     if not _NBA_PROPS: return None
-
     ctx = get_nba_prop_context(m.ticker, m.yes_bid, espn_cache)
     if not ctx or not ctx.should_enter:
         return None
-
-    conf        = ctx.confidence
+    conf = ctx.confidence
+    # Hard floor
+    if conf < 0.63: return None
     price_cents = int(m.yes_ask * 100)
     base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.01)), Config.MAX_CONTRACTS))
-    contracts   = _scale_contracts(base_contracts, conf)
-
+    contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
-    if ev < 0.08: return None
-
+    if ev < 0.12: return None
     return TradeSignal(
-        event_ticker  = item["event_ticker"],
+        event_ticker = item["event_ticker"],
         market_ticker = m.ticker,
-        side          = "yes",
-        action        = "buy",
-        price         = price_cents,
-        contracts     = contracts,
-        strategy      = "prop_nba",
-        reason        = f"NBA {ctx.stat_type}: {ctx.reason} | edge={ctx.edge:+.2f}",
-        confidence    = conf,
+        side = "yes",
+        action = "buy",
+        price = price_cents,
+        contracts = contracts,
+        strategy = "prop_nba",
+        reason = f"NBA {ctx.stat_type}: {ctx.reason} | edge={ctx.edge:+.2f}",
+        confidence = conf,
     )
-
 
 # =============================================================================
 # STRATEGY 6: MLB Spring Training Underdog
-# Buy cheaper side when spring training record supports it
-# Pre-game only, volume >= 400, spread <= 3c, YES bid 33-48c
 # =============================================================================
 def strategy_mlb_underdog(item, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
     m = item["market"]
-
     if not m.ticker.startswith("KXMLBSTGAME"):
         return None
-
     status = item.get("market_status", "active")
     if status != "open":
-        return None  # pre-game only
-
-    # Accept both sides — context will determine which has edge
-    # Underdog (33-48c) OR slight favorite (52-65c) if record supports it
+        return None
     if m.yes_bid < 0.33 or m.yes_bid > 0.65: return None
     if m.volume < 400 or m.spread > 3: return None
-
     if not _MLB_PROPS: return None
-
     ctx = get_mlb_context(m.ticker, m.yes_bid)
     if not ctx or not ctx.should_enter:
         return None
-
-    conf        = ctx.confidence
+    conf = ctx.confidence
+    if conf < 0.63: return None
     price_cents = int(m.yes_ask * 100)
     base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.01)), Config.MAX_CONTRACTS))
-    contracts   = _scale_contracts(base_contracts, conf)
-
+    contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
-    if ev < 0.06: return None  # lower EV bar for spring training
-
+    if ev < 0.08: return None  # spring training keeps lower EV bar
     return TradeSignal(
-        event_ticker  = item["event_ticker"],
+        event_ticker = item["event_ticker"],
         market_ticker = m.ticker,
-        side          = "yes",
-        action        = "buy",
-        price         = price_cents,
-        contracts     = contracts,
-        strategy      = "mlb_underdog",
-        reason        = f"MLB ST: {ctx.summary()}",
-        confidence    = conf,
+        side = "yes",
+        action = "buy",
+        price = price_cents,
+        contracts = contracts,
+        strategy = "mlb_underdog",
+        reason = f"MLB ST: {ctx.summary()}",
+        confidence = conf,
     )
-
 
 # =============================================================================
 # EXIT STRATEGY
-# YES positions: trail stop + stale exit
-# NO positions: hold to settlement always
 # =============================================================================
 def strategy_exit(item, pos, espn_cache=None):
     from kalshi_bot import TradeSignal, Config
@@ -589,42 +567,34 @@ def strategy_exit(item, pos, espn_cache=None):
     m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
     contracts=pos["contracts"]; strategy=pos["strategy"]
     if entry==0: return None
-    if side=="no": return None  # NO positions settle naturally
-
+    if side=="no": return None
     bid=max(1,int(m.yes_bid*100))
     peak=max(bid,pos.get("peak_price",entry))
     pos["peak_price"]=peak
-
     fee_mult=0.0175
     entry_fee=pos.get("entry_fee",0.0)
     exit_fee=math.ceil(fee_mult*contracts*(bid/100)*(1-bid/100)*100)/100
     pnl=(bid-entry)*contracts/100.0-entry_fee-exit_fee
-
-    if entry<=15:   stop=max(1,peak-max(3,int(peak*0.50)))
+    if entry<=15: stop=max(1,peak-max(3,int(peak*0.50)))
     elif pnl>=2.00: stop=int(peak*0.88)
     elif pnl>=0.50: stop=int(peak*0.82)
-    else:           stop=int(entry*0.70)
-
+    else: stop=int(entry*0.70)
     stale=False
     try:
         et=pos.get("entry_time","")
         if et:
             age=(datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
             strategy_name=pos.get("strategy","")
-            # Tennis matches run 1-3hrs — never stale-exit while match could still be live
-            # NBA: 48min real time, MLB: ~3hrs. Use sport-aware minimums.
             if "tennis" in strategy_name.lower():
-                stale_min_age = 7200   # 2 hours — a full tennis match
+                stale_min_age = 7200
             elif "mlb" in strategy_name.lower():
-                stale_min_age = 10800  # 3 hours
+                stale_min_age = 10800
             else:
-                stale_min_age = 1800   # 30 min for NBA
+                stale_min_age = 1800
             if age > stale_min_age and abs(bid-entry) < 4 and pnl < 0.10:
                 stale=True
     except: pass
-
     if not (bid<=stop or stale): return None
-
     if stale and bid>stop:
         reason=f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
         strat=f"exit_stale_{strategy}"
@@ -634,7 +604,6 @@ def strategy_exit(item, pos, espn_cache=None):
     else:
         reason=f"Stop loss: {bid}c<={stop}c entry={entry}c PNL=${pnl:.2f}"
         strat=f"exit_sl_{strategy}"
-
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side=side, action="sell", price=bid, contracts=contracts,
