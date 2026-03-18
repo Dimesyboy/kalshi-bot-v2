@@ -177,15 +177,19 @@ def _parse_ticker_players(ticker: str) -> Tuple[str, str]:
 def _name_matches_fragment(fragment: str, full_name: str) -> bool:
     if not fragment or not full_name:
         return False
+    # Require minimum fragment length to avoid false positives
+    if len(fragment) < 4:
+        return False
     frag = fragment.upper()
     name = full_name.upper()
+    # Direct substring match
     if frag in name:
         return True
+    # Word-level match - fragment must match start of a word with 4+ chars
     for word in re.split(r'[\s.\-]', name):
-        if word and (word.startswith(frag) or frag.startswith(word[:3])):
+        if len(word) >= 4 and word.startswith(frag[:4]):
             return True
     return False
-
 
 def _build_context(match: dict, ticker: str) -> Optional[TennisContext]:
     try:
@@ -318,7 +322,7 @@ def get_tennis_context(ticker: str, espn_cache=None) -> Optional[TennisContext]:
             best_score = score
             best_match = match
 
-    if not best_match or best_score < 2:
+    if not best_match or best_score < 3:
         log.debug(f"[Tennis] No match for {ticker} (frags={p1_frag}/{p2_frag} score={best_score})")
         return None
 
