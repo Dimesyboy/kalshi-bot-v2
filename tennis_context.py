@@ -1,3 +1,4 @@
+import os
 #!/usr/bin/env python3
 """
 tennis_context.py
@@ -21,7 +22,7 @@ from typing import Optional, List, Tuple, Dict
 
 log = logging.getLogger("kalshi_bot.tennis")
 
-TENNIS_API_KEY = "d5a36c825abb6150aa2b7b90bcf353b5e94da8400f477f02c02727ff068b2b87"
+TENNIS_API_KEY = os.getenv("TENNIS_API_KEY", "")
 TENNIS_API_URL = "https://api.api-tennis.com/tennis/"
 TIMEOUT        = 8
 

@@ -129,15 +129,8 @@ try:
     buys  = [f for f in today_fills if f.get("action") == "buy"]
     sells = [f for f in today_fills if f.get("action") == "sell"]
     print(f" Total: {len(today_fills)} ({len(buys)} buys, {len(sells)} sells)")
-    wins = losses = 0
-    for f in sells:
-        price = float(f.get("yes_price_dollars", 0) or f.get("no_price_dollars", 0) or 0)
-        if price * 100 > 50:
-            wins += 1
-        else:
-            losses += 1
     if sells:
-        print(f" Sells: ~{wins} profitable, ~{losses} at loss")
+        print(f" Sells: {len(sells)} (see trade_log.csv for accurate PNL per trade)")
 except Exception as e:
     print(f" Could not fetch fills: {e}")
 

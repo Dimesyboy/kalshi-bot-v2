@@ -62,6 +62,8 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 from dotenv import load_dotenv
+load_dotenv()
+from models import Config, Market, GameEvent, TradeSignal
 from telegram_controller import TelegramController
 from trade_tracker import log_trade
 from price_watcher import PriceWatcher
@@ -71,92 +73,12 @@ from strategies import (
 )
 from timing import timed, timed_block, get_report
 
-load_dotenv()
 
 # ==============================================================================
 
 # CONFIG
 
 # ==============================================================================
-
-class Config:
-    # - Bot control ------------------------------------------
-    DRY_RUN         = False
-    LOOP_INTERVAL   = 45  # increased — snapshot fetch now ~28s with dual open+active passes
-    LOG_FILE        = "kalshi_bot.log"
-    PNL_LOG_FILE    = "pnl_log.json"
-
-    # -- Hot-reload ------------------------------------------------------------
-    WATCH_SOURCE_FILE = True
-
-    # -- Sports toggles --------------------------------------------------------
-    ENABLE_NBA    = True
-    ENABLE_TENNIS = True
-    ENABLE_MLB    = True
-
-    # -- LLM -------------------------------------------------------------------
-    LLM_ASSIST               = False
-    LLM_MODEL                = "gpt-4o"
-    LLM_CONFIDENCE_THRESHOLD = 0.58
-
-    # -- Trade thresholds ------------------------------------------------------
-    MIN_VOLUME       = 5000
-    MAX_SPREAD_CENTS = 8
-    MIN_LIQUIDITY    = 0.0
-    MAX_POSITION_USD = 1.00  # fallback only — overridden by dynamic sizing below
-    MAX_OPEN_POSITIONS  = 4   # scales up automatically with balance (see _get_position_size)
-    # Dynamic position sizing: % of live balance per trade
-    POSITION_SIZE_PCT   = 0.08   # 8% of balance per position
-    MAX_POSITION_HARD   = 10.00  # never more than $10 per position regardless of balance
-    MAX_OPEN_HARD       = 8      # never more than 8 positions regardless of balance
-    MAX_CONTRACTS    = 20
-    MIN_NO_PRICE     = 5
-
-    # -- Overexposure guard ----------------------------------------------------
-    MAX_CONTRACTS_PER_EVENT = 20
-
-    # -- Exit thresholds (cents) -----------------------------------------------
-    TAKE_PROFIT_PCT = 0.30  # 30% gain — faster scalp target
-    STOP_LOSS_PCT   = 0.35  # 35% loss — tighter stop
-
-    # -- Slippage simulation (dry-run only) ------------------------------------
-    SLIP_CENTS = 1
-
-    # -- Daily loss limit ------------------------------------------------------
-    MAX_DAILY_LOSS_USD = 999999.00  # OFF for testing
-
-    # -- Stale position pruning ------------------------------------------------
-    POSITION_MAX_AGE_HOURS = 8
-
-    # -- Settlement check age gate ---------------------------------------------
-    SETTLE_MIN_AGE_MINUTES = 30
-
-    # -- Signal cooldown -------------------------------------------------------
-    SIGNAL_COOLDOWN_SECS = 1800  # 30 min — prevents re-entry on same ticker
-
-    # -- Fees ------------------------------------------------------------------
-    TAKER_FEE_MULTIPLIER = 0.07
-    MAKER_FEE_MULTIPLIER = 0.0175
-
-    # -- Kalshi API ------------------------------------------------------------
-    KALSHI_BASE     = "https://api.elections.kalshi.com/trade-api/v2"
-    KALSHI_KEY_ID   = os.getenv("KALSHI_API_KEY_ID", "")
-    KALSHI_KEY_FILE = os.getenv("KALSHI_PRIVATE_KEY_PATH", "/root/kalshi_private_key.pem")
-
-    # -- Fetcher rate-limit guard ----------------------------------------------
-    FETCH_DELAY_SECS = 0.25  # reduced — 429s not seen in practice
-
-    # -- Logging rotation ------------------------------------------------------
-    LOG_MAX_BYTES    = 5 * 1024 * 1024
-    LOG_BACKUP_COUNT = 3
-
-    # -- Telegram --------------------------------------------------------------
-    TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-    TELEGRAM_CHAT  = os.getenv("TELEGRAM_CHAT_ID", "")
-
-    # -- OpenAI ----------------------------------------------------------------
-    OPENAI_KEY = os.getenv("OPENAI_API_KEY", "")
-
 # ==============================================================================
 
 # LOGGING
@@ -173,60 +95,6 @@ _stream_handler = logging.StreamHandler()
 _stream_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
 logging.basicConfig(level=logging.INFO, handlers=[_file_handler, _stream_handler])
 log = logging.getLogger("kalshi_bot")
-
-# ==============================================================================
-
-# DATA STRUCTURES
-
-# ==============================================================================
-
-@dataclass
-class Market:
-    ticker:     str
-    title:      str
-    yes_bid:    float
-    yes_ask:    float
-    no_bid:     float
-    no_ask:     float
-    last_price: float
-    volume:     float
-    liquidity:  float
-    close_time: Optional[str]
-    series:     str
-    label:      str
-    market_status: str = "active"
-
-    @property
-    def spread(self):
-        return round((self.yes_ask - self.yes_bid) * 100, 1)
-
-    @property
-    def mid(self):
-        return round((self.yes_bid + self.yes_ask) / 2 * 100, 1)
-
-@dataclass
-class GameEvent:
-    event_ticker: str
-    title:        str
-    sport:        str
-    close_time:   Optional[str]
-    markets:      dict = field(default_factory=dict)
-
-@dataclass
-class TradeSignal:
-    event_ticker:  str
-    market_ticker: str
-    side:          str
-    action:        str
-    price:         int
-    contracts:     int
-    strategy:      str
-    reason:        str
-    confidence:    float
-    llm_approved:  Optional[bool] = None
-    llm_note:      Optional[str]  = None
-    market_status: str             = "active"
-    second_entry:  bool            = False
 
 # ==============================================================================
 
@@ -323,7 +191,6 @@ def _atomic_write_json(path: str, data):
 # ==============================================================================
 
 POSITIONS_FILE = "positions.json"
-_bot_orders: set = set()  # module-level — populated by run_bot(), used by execute_signal()
 _bot_orders: set = set()  # module-level — populated by run_bot(), used by execute_signal()
 
 def load_positions() -> dict:
@@ -899,7 +766,10 @@ def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hi
     for item in watchlist:
         ticker = item["market"].ticker
         if ticker in open_positions:
-            exit_signal = strategy_exit(item, open_positions[ticker], espn_cache=espn_cache)
+            pos = open_positions[ticker]
+            if pos.get("is_bot") is False:
+                continue  # never exit manually placed positions
+            exit_signal = strategy_exit(item, pos, espn_cache=espn_cache)
             if exit_signal:
                 log.info(f"[Strategy:exit] {exit_signal.market_ticker} - {exit_signal.reason}")
                 signals.append(exit_signal)
@@ -1803,6 +1673,10 @@ def run_bot():
             current_date  = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
             for signal in signals:
+                # skip if watcher already exiting this ticker
+                if signal.action == "sell" and signal.market_ticker in _watcher._exiting:
+                    log.info(f"[Loop] Skipping sell {signal.market_ticker} — watcher already exiting")
+                    continue
                 placed, total_pnl = execute_signal(
                     signal, snapshot, open_positions,
                     total_pnl, pnl_log, current_date, client,

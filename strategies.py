@@ -64,10 +64,24 @@ def _is_tennis(ticker):
         "KXATPCHALLENGERMATCH","KXWTACHALLENGERMATCH",
     ])
 
-def _is_live(status, sport, ticker):
-    if status == "active": return True
-    if sport == "Tennis" and status == "open": return True
-    return False
+def _is_live(status, sport, ticker, espn_cache=None):
+    """
+    Determine if a game is currently in progress.
+    Kalshi 'active' just means the market is open for trading — not that the game is live.
+    We use ESPN ctx.is_live as the source of truth when available.
+    Falls back to False (pre-game assumed) if no ESPN context.
+    """
+    if espn_cache is not None:
+        if _is_nba_mlb(ticker) and _NBA_CTX:
+            ctx = find_game_for_ticker(ticker, espn_cache)
+            if ctx is not None:
+                return ctx.is_live
+        if _is_tennis(ticker) and _TENNIS_CTX:
+            from tennis_context import get_tennis_context
+            tctx = get_tennis_context(ticker, espn_cache)
+            if tctx is not None:
+                return tctx.is_live
+    return False  # assume pre-game if no ESPN context
 
 def _scale_contracts(base_contracts, confidence, max_contracts=20):
     """Scale position size by confidence above 0.63 floor.
@@ -258,9 +272,32 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
     return 0.0
 
 def _ev(contracts, price_cents, confidence, is_maker=True):
-    pd=price_cents/100.0; payout=(1.0-pd)*contracts; stake=pd*contracts
+    pd=price_cents/100.0
+    # payout per contract if win, stake per contract if loss (in dollars)
+    payout_per = (1.0 - pd)          # win: collect (1-p) per contract
+    stake_per  = pd                   # loss: lose p per contract
     fee=math.ceil((0.0175 if is_maker else 0.07)*contracts*pd*(1-pd)*100)/100.0
-    return round(confidence*payout-(1.0-confidence)*stake-fee*2,4)
+    gross_ev = confidence*payout_per - (1.0-confidence)*stake_per
+    net_ev   = gross_ev*contracts - fee*2
+    return round(net_ev, 4)
+
+def _ratio_ok(price_cents, min_ratio=1.5):
+    """Payout must be at least min_ratio x stake.
+    40c: payout=60c/stake=40c = 1.5 OK
+    65c: payout=35c/stake=65c = 0.54 FAIL
+    """
+    pd = price_cents / 100.0
+    if pd <= 0: return False
+    return (1.0 - pd) / pd >= min_ratio
+
+
+def _ratio_ok(price_cents, min_ratio=1.5):
+    """Payout must be at least min_ratio times the stake.
+    e.g. at 40c: payout=60c, stake=40c, ratio=1.5 — just passes
+    at 65c: payout=35c, stake=65c, ratio=0.54 — fails
+    """
+    pd = price_cents / 100.0
+    return (1.0 - pd) / pd >= min_ratio
 
 # =============================================================================
 # STRATEGY 1: Value Fade
@@ -272,15 +309,15 @@ def _ev(contracts, price_cents, confidence, is_maker=True):
 #   - Confidence gate raised to 0.63 minimum
 # =============================================================================
 def strategy_value_fade(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m=item["market"]
     if not _allowed(m.ticker): return None
 
     sport=item.get("sport","")
     status=item.get("market_status","active")
-    live=_is_live(status, sport, m.ticker)
+    live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
 
-    if m.yes_bid < 0.95: return None
+    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%
 
     # Volume gates by market type
     if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
@@ -294,7 +331,7 @@ def strategy_value_fade(item, espn_cache=None):
     if m.spread > 3: return None
 
     no_bid_cents=max(1,int(m.no_bid*100))
-    if no_bid_cents < 5: return None
+    if no_bid_cents < 2: return None
 
     # Stale price guard — if market has been pinned at 95c+ for >2 min,
     # the price is likely correct (blowout, game over, etc). Skip it.
@@ -371,12 +408,12 @@ def strategy_value_fade(item, espn_cache=None):
 # STRATEGY 2: NBA/MLB Prop YES (disabled — kept for reference)
 # =============================================================================
 def strategy_prop_yes(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m=item["market"]
     if not _is_prop(m.ticker): return None
     sport=item.get("sport","")
     status=item.get("market_status","active")
-    live=_is_live(status, sport, m.ticker)
+    live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
     if m.yes_bid < 0.62 or m.yes_bid > 0.78: return None
     if m.volume < 5000 or m.spread > 4: return None
     if live and espn_cache and _NBA_CTX:
@@ -416,13 +453,13 @@ def strategy_prop_yes(item, espn_cache=None):
 # STRATEGY 3: Tennis Live Underdog
 # =============================================================================
 def strategy_tennis_underdog(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m=item["market"]
     sport=item.get("sport","")
     if sport != "Tennis": return None
     if not _is_tennis(m.ticker): return None
     status=item.get("market_status","active")
-    live=_is_live(status, sport, m.ticker)
+    live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
     if not live: return None
     if m.yes_bid < 0.20 or m.yes_bid > 0.38: return None
     if m.volume < 8000 or m.spread > 3: return None
@@ -455,7 +492,7 @@ def strategy_tennis_underdog(item, espn_cache=None):
 # STRATEGY 4: Quarter/Half Winner
 # =============================================================================
 def strategy_quarter_winner(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m=item["market"]
     if not any(m.ticker.startswith(s) for s in [
         "KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER",
@@ -490,13 +527,13 @@ def strategy_quarter_winner(item, espn_cache=None):
 # STRATEGY 5: NBA Player Props (Points + 3PT)
 # =============================================================================
 def strategy_prop_nba(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m = item["market"]
     if not any(m.ticker.startswith(s) for s in ["KXNBAPTS", "KXNBA3PT"]):
         return None
     status = item.get("market_status", "active")
     sport = item.get("sport", "")
-    if m.yes_bid < 0.55 or m.yes_bid > 0.80: return None
+    if m.yes_bid < 0.55 or m.yes_bid > 0.62: return None
     if m.volume < 5000 or m.spread > 5: return None
     if not _NBA_PROPS: return None
     ctx = get_nba_prop_context(m.ticker, m.yes_bid, espn_cache)
@@ -526,7 +563,7 @@ def strategy_prop_nba(item, espn_cache=None):
 # STRATEGY 6: MLB Spring Training Underdog
 # =============================================================================
 def strategy_mlb_underdog(item, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     m = item["market"]
     if not m.ticker.startswith("KXMLBSTGAME"):
         return None
@@ -562,7 +599,7 @@ def strategy_mlb_underdog(item, espn_cache=None):
 # EXIT STRATEGY
 # =============================================================================
 def strategy_exit(item, pos, espn_cache=None):
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     from datetime import datetime, timezone
     m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
     contracts=pos["contracts"]; strategy=pos["strategy"]
@@ -621,6 +658,6 @@ STRATEGIES = [
     _wrap(strategy_prop_nba),
     _wrap(strategy_mlb_underdog),
     # strategy_prop_yes disabled — replaced by strategy_prop_nba (data-driven)
-    _wrap(strategy_tennis_underdog),
+    # _wrap(strategy_tennis_underdog),  # DISABLED — 15% win rate, -$4.74 over 39 trades
     _wrap(strategy_quarter_winner),
 ]

@@ -355,6 +355,9 @@ class PriceWatcher:
             if ticker in self._exiting:
                 continue
 
+            if pos.get("is_bot") is False:
+                continue  # never touch manually placed positions
+
             entry = pos.get("entry_price", 0)
             if entry == 0:
                 continue

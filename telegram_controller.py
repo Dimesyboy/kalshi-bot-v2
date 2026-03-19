@@ -304,7 +304,19 @@ class TelegramController:
                 try:
                     side       = pos["side"]
                     contracts  = int(pos["contracts"])
-                    sell_price = max(1, pos.get("entry_price", 1) - 20)
+                    # fetch live bid price instead of guessing entry_price - 20
+                    try:
+                        _r = requests.get(
+                            f"https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}",
+                            timeout=6)
+                        _m = _r.json().get("market", {})
+                        if side == "no":
+                            live_bid = int(float(_m.get("no_bid_dollars", 0) or 0) * 100)
+                        else:
+                            live_bid = int(float(_m.get("yes_bid_dollars", 0) or 0) * 100)
+                        sell_price = max(1, live_bid)
+                    except Exception:
+                        sell_price = max(1, pos.get("entry_price", 1))
                     portfolio_api.create_order(
                         ticker          = ticker,
                         action          = "sell",
