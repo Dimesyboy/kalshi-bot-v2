@@ -317,15 +317,24 @@ def strategy_value_fade(item, espn_cache=None):
     status=item.get("market_status","active")
     live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
 
+    # never enter a position on a game ESPN has already marked as finished
+    if espn_cache is not None and _is_nba_mlb(m.ticker):
+        from nba_context import find_game_for_ticker
+        _ctx = find_game_for_ticker(m.ticker, espn_cache)
+        if _ctx and _ctx.is_final:
+            return None
+
     if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%
 
-    # Volume gates by market type
+    # Volume gates by market type — at $1-10 position sizes, 3000 vol is ample liquidity
     if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 3000
+        min_vol = 2000
     elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 400
+        min_vol = 300
+    elif any(m.ticker.startswith(s) for s in ["KXWTAMATCH","KXWTAGAME","KXWTACHALLENGERMATCH"]):
+        min_vol = 4000  # WTA less liquid than ATP
     else:
-        min_vol = 8000
+        min_vol = 5000  # NBA/MLB/ATP full game markets
 
     if m.volume < min_vol: return None
     if m.spread > 3: return None

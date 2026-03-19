@@ -24,7 +24,7 @@ log = logging.getLogger("kalshi_bot.tennis")
 
 TENNIS_API_KEY = os.getenv("TENNIS_API_KEY", "")
 TENNIS_API_URL = "https://api.api-tennis.com/tennis/"
-TIMEOUT        = 8
+TIMEOUT        = 3
 
 _livescore_cache: Dict = {}
 _rankings_cache:  Dict = {}

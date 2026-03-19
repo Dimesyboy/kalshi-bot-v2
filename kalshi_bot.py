@@ -760,7 +760,7 @@ def analyze_snapshot(snapshot: dict) -> list:
 # ==============================================================================
 
 
-def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hit, espn_cache=None):
+def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hit, espn_cache=None, signal_cooldown=None):
     signals = []
     pending_tickers = set()
     for item in watchlist:
@@ -776,6 +776,8 @@ def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hi
             continue
         if ticker in pending_tickers or daily_limit_hit:
             continue
+        if signal_cooldown and ticker in signal_cooldown:
+            continue  # cooldown active — skip this ticker
         event_ticker = item["event_ticker"]
         current_exposure = event_open_contracts(open_positions, event_ticker)
         if current_exposure >= Config.MAX_CONTRACTS_PER_EVENT:
@@ -1649,7 +1651,7 @@ def run_bot():
             # signal_cooldown preserved across cycles — do not reset
             watchlist_filtered = watchlist
 
-            signals = run_strategies(watchlist_filtered, open_positions, total_pnl, pnl_log, daily_limit_hit or bot_paused, espn_cache=espn_cache)
+            signals = run_strategies(watchlist_filtered, open_positions, total_pnl, pnl_log, daily_limit_hit or bot_paused, espn_cache=espn_cache, signal_cooldown=signal_cooldown)
 
             if Config.LLM_ASSIST:
                 evaluated = []
@@ -1684,13 +1686,9 @@ def run_bot():
                 if placed:
                     trades_placed += 1
                     alert_trade_placed(signal)
-                if signal.action == "buy":
-                    signal_cooldown[signal.market_ticker] = now_ts + Config.SIGNAL_COOLDOWN_SECS
-                elif signal.action == "sell":
-                    # Block re-entry on any ticker we just exited for 30 min
+                if signal.action in ("buy", "sell"):
                     signal_cooldown[signal.market_ticker] = now_ts + Config.SIGNAL_COOLDOWN_SECS
                     try:
-                        import json as _j
                         _atomic_write_json("cooldown.json", signal_cooldown)
                     except: pass
 
