@@ -69,23 +69,39 @@ def parse_prop_ticker(ticker: str) -> dict:
 
 
 def find_game_for_ticker(ticker: str, espn_cache) -> Optional[object]:
-    """Find ESPN GameContext matching a Kalshi NBA ticker."""
+    """Find ESPN GameContext matching a Kalshi NBA ticker.
+    Prefers live/pre-game matches over final games.
+    Falls back to final games only if no active game found.
+    """
     if not espn_cache: return None
     parsed = parse_prop_ticker(ticker)
     team1 = parsed.get("team1","")
     team2 = parsed.get("team2","")
     if not team1 or not team2: return None
 
-    # Match on abbreviation directly (LAL, GSW etc.) — name substring fails for 3-letter codes
     nba_col = espn_cache._all.get("NBA")
-    if nba_col:
-        for ctx in nba_col:
-            if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
-                return ctx
-    # fallback: name substring
-    for team in [team1, team2]:
-        ctx = espn_cache.find("NBA", team)
-        if ctx: return ctx
+    if not nba_col:
+        return None
+
+    # First pass — find live or pre-game match (not final)
+    for ctx in nba_col:
+        if ctx.is_final:
+            continue
+        if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
+            return ctx
+
+    # Second pass — match both teams simultaneously (more precise)
+    for ctx in nba_col:
+        home = ctx.home.abbreviation
+        away = ctx.away.abbreviation
+        if (home in (team1, team2)) and (away in (team1, team2)):
+            return ctx
+
+    # Final fallback — any match including finished games
+    for ctx in nba_col:
+        if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
+            return ctx
+
     return None
 
 

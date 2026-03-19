@@ -83,10 +83,16 @@ def _is_live(status, sport, ticker, espn_cache=None):
                 return tctx.is_live
     return False  # assume pre-game if no ESPN context
 
-def _scale_contracts(base_contracts, confidence, max_contracts=20):
-    """Scale position size by confidence above 0.63 floor.
-    Tighter floor than before — only meaningful confidence gets a boost."""
-    scale = 1.0 + max(0.0, (confidence - 0.63) / 0.10) * 0.5
+def _scale_contracts(base_contracts, confidence, max_contracts=None):
+    """Scale position size by confidence above 0.60 floor.
+    Uses Config.MAX_CONTRACTS as ceiling unless overridden."""
+    if max_contracts is None:
+        try:
+            from models import Config
+            max_contracts = Config.MAX_CONTRACTS
+        except:
+            max_contracts = 100
+    scale = 1.0 + max(0.0, (confidence - 0.60) / 0.10) * 0.5
     return max(1, min(int(base_contracts * scale), max_contracts))
 
 # =============================================================================
@@ -332,13 +338,22 @@ def strategy_value_fade(item, espn_cache=None):
     live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
 
     # never enter a position on a game ESPN has already marked as finished
+    # only block if BOTH teams in the ticker match the final game (date-specific)
     if espn_cache is not None and _is_nba_mlb(m.ticker):
-        from nba_context import find_game_for_ticker
+        from nba_context import find_game_for_ticker, parse_prop_ticker
         _ctx = find_game_for_ticker(m.ticker, espn_cache)
         if _ctx and _ctx.is_final:
-            return None
+            # verify it's the same game — both teams must match
+            _parsed = parse_prop_ticker(m.ticker)
+            _t1 = _parsed.get("team1","").upper()
+            _t2 = _parsed.get("team2","").upper()
+            _home = _ctx.home.abbreviation.upper()
+            _away = _ctx.away.abbreviation.upper()
+            _both_match = (_t1 in (_home,_away)) and (_t2 in (_home,_away))
+            if _both_match:
+                return None  # confirmed same game, it's final
 
-    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%
+    if m.yes_bid < 0.90: return None  # lowered from 0.92 — confidence model handles quality filter
 
     # Volume gates by market type — at $1-10 position sizes, 3000 vol is ample liquidity
     if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
@@ -362,68 +377,57 @@ def strategy_value_fade(item, espn_cache=None):
         log.debug(f"[value_fade] SKIP {m.ticker} — stale 95c+ price, not a fade opportunity")
         return None
 
-    conf=0.65
-    ctx_reason="no context"
+    # ── Data-driven confidence scoring ──────────────────────────────────────
+    try:
+        from confidence_model import score_value_fade, record_price
+        record_price(m.ticker, m.yes_bid)
+        conf, ctx_reason = score_value_fade(item, espn_cache=espn_cache)
+    except Exception as _e:
+        log.debug(f"[value_fade] confidence_model failed: {_e} — using base")
+        conf = 0.65
+        ctx_reason = "base confidence"
 
+    # Live NBA/MLB gates — still apply regardless of confidence score
     if _is_nba_mlb(m.ticker):
         if _is_prop(m.ticker): return None
         if live:
             if not _NBA_CTX or not espn_cache:
                 return None
-            ctx=find_game_for_ticker(m.ticker, espn_cache)
-            if not ctx:
+            ctx = find_game_for_ticker(m.ticker, espn_cache)
+            if not ctx or not ctx.is_live:
                 return None
-            if not ctx.is_live:
-                return None
-            # Only Q1 or Q2
             if ctx.nba_quarter > 2:
                 return None
-            # Tightened: lead must be < 5, not < 8
-            # Lead of 8 in Q1 is already meaningful in NBA — don't fade it
             if abs(ctx.lead) > 5:
                 return None
-            conf=0.66
-            ctx_reason=f"Live Q{ctx.nba_quarter} lead={ctx.lead} — early game fade"
-        else:
-            if not _NBA_CTX or not espn_cache:
-                conf=0.65; ctx_reason="pre-game no ESPN"
-            else:
-                enter,ctx_conf,ctx_reason=nba_value_fade_check(m.ticker,m.yes_bid,espn_cache)
-                if not enter: return None
-                conf=max(conf,ctx_conf)
+            ctx_reason = f"Live Q{ctx.nba_quarter} lead={ctx.lead} | {ctx_reason}"
 
     elif _is_tennis(m.ticker):
         if live and _TENNIS_CTX and espn_cache:
-            tctx=get_tennis_context(m.ticker, espn_cache)
+            tctx = get_tennis_context(m.ticker, espn_cache)
             if tctx:
                 if tctx.p1_sets > 1 or tctx.p2_sets > 1:
                     return None
-                conf=min(0.68, tctx.underdog_conf)
-                ctx_reason=f"Tennis live fade: {tctx.summary()}"
-            else:
-                conf=0.65; ctx_reason="tennis live no ctx"
-        else:
-            conf=0.65; ctx_reason="tennis pre-game"
+                ctx_reason = f"Tennis live | {ctx_reason}"
 
-    # Hard confidence floor — must clear 0.63 to proceed
-    if conf < 0.63:
+    # Hard confidence floor
+    if conf < 0.60:
+        log.debug(f"[value_fade] SKIP {m.ticker} — confidence {conf} below floor")
         return None
 
-    base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.no_bid,0.15)),Config.MAX_CONTRACTS))
-    contracts=_scale_contracts(base_contracts, conf)
+    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.no_bid, 0.01)),
+                                Config.MAX_CONTRACTS))
+    contracts = _scale_contracts(base_contracts, conf)
 
-    if m.yes_bid>=0.98: conf=min(conf+0.02, 0.72)
-    if m.yes_bid>=0.99: conf=min(conf+0.02, 0.74)
-
-    ev=_ev(contracts,no_bid_cents,conf,is_maker=True)
-    # Raised EV gate from 0.08 to 0.12 — filters marginal fades
+    ev = _ev(contracts, no_bid_cents, conf, is_maker=True)
     if ev < 2.0: return None
 
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="no", action="buy", price=no_bid_cents, contracts=contracts,
         strategy="value_fade",
-        reason=f"Fade {int(m.yes_bid*100)}c | NO={no_bid_cents}c vol={int(m.volume)} sprd={m.spread}c | {ctx_reason}",
+        reason=f"Fade {int(m.yes_bid*100)}c | NO={no_bid_cents}c vol={int(m.volume)} "
+               f"sprd={m.spread}c conf={conf} | {ctx_reason}",
         confidence=conf,
     )
 
