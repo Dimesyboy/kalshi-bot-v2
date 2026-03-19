@@ -377,14 +377,12 @@ class PriceWatcher:
 
             # ── Unified exit logic — all sports, both sides ──────────────
             # Trail activation is side and price aware
-            if side == "no" and entry <= 15:
-                trail_mult = 3.0   # low-price NO: wait for real momentum
-            elif side == "no":
-                trail_mult = 2.0   # higher-price NO
-            else:
-                trail_mult = 1.5   # YES positions
-
-            trail_active = bid >= entry * trail_mult
+            import math as _math
+            _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            _fees = _ef + _xf
+            _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
+            trail_active = bid >= entry + _cents
             trail_stop   = int(peak * 0.80)
             hard_stop    = int(entry * 0.60)
 

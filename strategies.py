@@ -653,17 +653,13 @@ def strategy_exit(item, pos, espn_cache=None):
     exit_fee   = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
     pnl        = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
 
-    # Trail activation threshold — side and price aware
-    # NO positions at low prices need more room (3x) to avoid noise exits
-    # YES positions trail tighter (1.5x) since they move faster
-    if side == "no" and entry <= 15:
-        trail_mult = 3.0   # low-price NO: wait for real underdog momentum
-    elif side == "no":
-        trail_mult = 2.0   # higher-price NO: tighter activation
-    else:
-        trail_mult = 1.5   # YES positions: standard activation
-
-    trail_active = bid >= entry * trail_mult
+    # Trail activates once position shows at least $0.10 net profit
+    import math as _math
+    _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+    _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+    _fees = _ef + _xf
+    _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
+    trail_active = bid >= entry + _cents
     trail_stop   = int(peak * 0.80)
 
     # Hard stop — 40% loss from entry regardless of trail
@@ -689,7 +685,7 @@ def strategy_exit(item, pos, espn_cache=None):
                 stale_min_age = 10800
             else:
                 stale_min_age = 1800
-            if age > stale_min_age and abs(bid-entry) < 4 and pnl < 0.10:
+            if age > stale_min_age and abs(bid-entry) < 4 and pnl < -0.20:
                 stale=True
     except: pass
     # stale exit — YES positions only, NO positions settle naturally
