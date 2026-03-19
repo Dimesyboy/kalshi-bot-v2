@@ -1,1009 +1,612 @@
 
-echo "models.py written"
-python3 -c "import ast; ast.parse(open('/root/models.py').read()); print('Syntax OK')"
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-# Replace all deferred imports inside functions
-old = "from kalshi_bot import TradeSignal, Config"
-new = "from models import TradeSignal, Config"
-count = content.count(old)
-content = content.replace(old, new)
-open('/root/strategies.py', 'w').write(content)
-print(f"Replaced {count} deferred imports in strategies.py")
-EOF
+cat << 'EOF' > /root/confidence_model.py
+#!/usr/bin/env python3
+"""
+confidence_model.py
+─────────────────────────────────────────────────────────────────
+Data-driven confidence scoring for value_fade and other strategies.
+Replaces the flat 0.65 hardcoded confidence.
 
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-echo "Done"
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
+Score is built from available signals:
+  - Kalshi market signals (price stability, volume, spread)
+  - ESPN team quality (win rate vs market price)
+  - ESPN game context (home/away, back-to-back)
+  - Injury report (star player missing)
+  - Tennis API (ranking gap, H2H, surface)
 
-# Add models import at top after existing imports
-old = "from dotenv import load_dotenv"
-new = "from dotenv import load_dotenv\nfrom models import Config, Market, GameEvent, TradeSignal"
+Final confidence is clamped to [0.55, 0.78].
+Below 0.55 = no edge, don't trade.
+Above 0.78 = overconfident, cap it.
+"""
 
-if "from models import" not in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("models import added to kalshi_bot.py")
-else:
-    print("already imported")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-python3 -c "
-import ast
-for f in ['models.py','kalshi_bot.py','strategies.py']:
-    try:
-        ast.parse(open(f'/root/{f}').read())
-        print(f'✅ {f}')
-    except SyntaxError as e:
-        print(f'❌ {f} line {e.lineno}: {e.msg}')
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-import models
-print('✅ models imported')
-import strategies
-print('✅ strategies imported')
-import kalshi_bot
-print('✅ kalshi_bot imported')
-print()
-print('Circular import: RESOLVED')
-"
-python3 /root/check_stack_v2.py 2>&1 | grep -E "FAIL|WARN" | grep -v "check_stack\|POSITION_SIZE\|MAX_POSITION_HARD\|LOOP_INTERVAL\|MAX_DAILY_LOSS\|active.*400\|competitions\|integration_patch\|bare.*
-
-python3 /root/check_stack_v2.py 2>&1 | grep -E "FAIL|WARN" | grep -v "check_stack\|POSITION_SIZE\|MAX_POSITION_HARD\|LOOP_INTERVAL\|MAX_DAILY_LOSS\|active.*400\|competitions\|integration_patch\|bare.*
-
-python3 /root/check_stack_v2.py 2>&1 | grep -E "FAIL|WARN" | grep -v "check_stack\|POSITION_SIZE\|MAX_POSITION_HARD\|LOOP_INTERVAL\|MAX_DAILY_LOSS\|active.*400\|competitions\|integration_patch\|bare.*except\|print.*calls"
-grep -n "entry_price.*20\|- 20" /root/telegram_controller.py
-python3 << 'EOF'
-content = open('/root/telegram_controller.py').read()
-old = '                        sell_price = max(1, pos.get("entry_price", 1) - 20)'
-new = '                        sell_price = max(1, pos.get("entry_price", 1))'
-if old in content:
-    content = content.replace(old, new)
-    open('/root/telegram_controller.py', 'w').write(content)
-    print("Fallback fixed")
-else:
-    print("Pattern not found")
-EOF
-
-grep -n "sell_price" /root/telegram_controller.py
-echo "Verified"
-python3 -c "import ast; ast.parse(open('/root/telegram_controller.py').read()); print('Syntax OK')"
-grep -n "^class Config\|^class Market\|^class GameEvent\|^class TradeSignal" /root/kalshi_bot.py
-sed -n '82,90p' /root/kalshi_bot.py
-sed -n '183,188p' /root/kalshi_bot.py
-sed -n '207,215p' /root/kalshi_bot.py
-sed -n '215,235p' /root/kalshi_bot.py
-sed -n '82,185p' /root/kalshi_bot.py | grep -n "^class\|^    OPENAI\|^    TELEGRAM\|^    FETCH\|^    LOG_MAX\|^    KALSHI_BASE"
-sed -n '155,190p' /root/kalshi_bot.py
-grep -n "second_entry\|^# =\|^class \|^def \|^_" /root/kalshi_bot.py | sed -n '10,25p'
-python3 << 'EOF'
-lines = open('/root/kalshi_bot.py').readlines()
-
-# Remove Config class: lines 82-160 (0-indexed: 81-159)
-# Remove DATA STRUCTURES section: lines 178-231 (0-indexed: 177-230)
-# We'll mark ranges to remove
-remove = set()
-for i in range(81, 160):   # Config class
-    remove.add(i)
-for i in range(177, 231):  # DATA STRUCTURES + Market + GameEvent + TradeSignal
-    remove.add(i)
-
-out = [l for i, l in enumerate(lines) if i not in remove]
-open('/root/kalshi_bot.py', 'w').writelines(out)
-print(f"Removed {len(remove)} lines")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Verifying imports still resolve..."
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from models import Config, Market, GameEvent, TradeSignal
-import kalshi_bot
-print('✅ All imports resolve')
-print(f'✅ Config accessible: DRY_RUN={kalshi_bot.Config.DRY_RUN}')
-print(f'✅ TradeSignal accessible: {kalshi_bot.TradeSignal}')
-"
-python3 /root/check_stack_v2.py 2>&1 | tail -20
-python3 /root/check_stack_v2.py 2>&1 | grep "WARN"
-grep -n "strategy_tennis_underdog\|tennis_underdog" /root/strategies.py | grep -v "def \|#"
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-old = '    _wrap(strategy_tennis_underdog),'
-new = '    # _wrap(strategy_tennis_underdog),  # DISABLED — 15% win rate, -$4.74 over 39 trades'
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("tennis_underdog disabled")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "
-from strategies import STRATEGIES
-print('Active strategies:')
-for s in STRATEGIES:
-    print(f'  {s.__name__}')
-"
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-grep -n "price_watcher\|watcher\|_exiting" /root/kalshi_bot.py | grep -v "#" | head -15
-grep -n "action.*sell\|is_exit\|def execute_signal" /root/kalshi_bot.py | head -15
-sed -n '1653,1665p' /root/kalshi_bot.py
-grep -n "execute_signal" /root/kalshi_bot.py
-sed -n '1670,1695p' /root/kalshi_bot.py
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-old = '''            for signal in signals:
-                placed, total_pnl = execute_signal(
-                    signal, snapshot, open_positions,
-                    total_pnl, pnl_log, current_date, client,
-                )'''
-
-new = '''            for signal in signals:
-                # skip if watcher already exiting this ticker
-                if signal.action == "sell" and signal.market_ticker in _watcher._exiting:
-                    log.info(f"[Loop] Skipping sell {signal.market_ticker} — watcher already exiting")
-                    continue
-                placed, total_pnl = execute_signal(
-                    signal, snapshot, open_positions,
-                    total_pnl, pnl_log, current_date, client,
-                )'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("_exiting guard added to main loop")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-python3 /root/check_stack_v2.py 2>&1 | tail -15
-python kalshi_bot.py
-python3 -c "
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
 import os
-print('KEY_ID:', os.getenv('KALSHI_API_KEY_ID','NOT SET')[:8])
-print('KEY_FILE:', os.getenv('KALSHI_PRIVATE_KEY_PATH','NOT SET'))
-print('TG_TOKEN:', os.getenv('TELEGRAM_BOT_TOKEN','NOT SET')[:8])
-print('TG_CHAT:', os.getenv('TELEGRAM_CHAT_ID','NOT SET'))
-"
-sed -n '1,75p' /root/kalshi_bot.py | grep -n "load_dotenv\|from models\|import models\|from dotenv"
-python3 << 'EOF'
-lines = open('/root/kalshi_bot.py').readlines()
-
-# Find the lines
-dotenv_import_line = None
-models_import_line = None
-load_dotenv_line = None
-
-for i, l in enumerate(lines):
-    if 'from dotenv import load_dotenv' in l:
-        dotenv_import_line = i
-    if 'from models import' in l:
-        models_import_line = i
-    if l.strip() == 'load_dotenv()':
-        load_dotenv_line = i
-
-print(f"dotenv import: {dotenv_import_line+1}")
-print(f"models import: {models_import_line+1}")
-print(f"load_dotenv(): {load_dotenv_line+1}")
-
-# Remove load_dotenv() from line 75 and insert it right after the dotenv import
-lines.pop(load_dotenv_line)
-# insert after dotenv import (which is now at same index)
-lines.insert(dotenv_import_line + 1, 'load_dotenv()\n')
-
-open('/root/kalshi_bot.py', 'w').writelines(lines)
-print("load_dotenv() moved before models import")
-EOF
-
-grep -n "load_dotenv\|from models" /root/kalshi_bot.py | head -5
-echo "Verified order"
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-python3 /root/kalshi_bot.py
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import STRATEGIES, ESPNContextCache
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-signals = [w for w in watchlist if w['flag'] == 'SIGNAL']
-
-print(f'Total watched: {len(watchlist)}')
-print(f'Total signals: {len(signals)}')
-print()
-for w in signals[:20]:
-    m = w['market']
-    print(f\"{w['sport']:<8} {m.ticker:<45} bid={int(m.yes_bid*100):>3}c ask={int(m.yes_ask*100):>3}c vol={int(m.volume):>6} sprd={m.spread:>4}c | {w['reason']}\")
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot, load_positions
-from strategies import STRATEGIES, ESPNContextCache, strategy_value_fade
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-rejected = []
-fired = []
-for item in watchlist:
-    for strat in STRATEGIES:
-        try:
-            sig = strat(item, espn_cache=espn_cache)
-            if sig:
-                fired.append((strat.__name__, item['market'].ticker, sig.price, sig.confidence))
-        except Exception as e:
-            rejected.append((strat.__name__, item['market'].ticker, str(e)))
-
-print(f'Fired: {len(fired)}')
-for s, t, p, c in fired:
-    print(f'  {s:<30} {t:<45} price={p}c conf={c}')
-
-print(f'Errors: {len(rejected)}')
-for s, t, e in rejected[:5]:
-    print(f'  {s}: {t} -> {e}')
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import ESPNContextCache, _allowed, _is_prop, _is_nba_mlb, _is_tennis
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-reasons = {}
-for item in watchlist:
-    m = item['market']
-    sport = item.get('sport','')
-    status = item.get('market_status','open')
-
-    if not _allowed(m.ticker):
-        reasons['not_allowed'] = reasons.get('not_allowed',0)+1; continue
-    if m.yes_bid < 0.95:
-        reasons['bid_below_95c'] = reasons.get('bid_below_95c',0)+1; continue
-    if _is_prop(m.ticker):
-        reasons['is_prop'] = reasons.get('is_prop',0)+1; continue
-
-    # volume gate
-    if any(m.ticker.startswith(s) for s in ['KXNBA1HWINNER','KXNBA2HWINNER','KXNBA1QWINNER','KXNBA2QWINNER','KXNBA3QWINNER','KXNBA4QWINNER']):
-        min_vol = 3000
-    elif m.ticker.startswith('KXMLBSTGAME'):
-        min_vol = 400
-    else:
-        min_vol = 8000
-    if m.volume < min_vol:
-        reasons[f'vol_below_{min_vol}'] = reasons.get(f'vol_below_{min_vol}',0)+1; continue
-    if m.spread > 3:
-        reasons['spread_too_wide'] = reasons.get('spread_too_wide',0)+1; continue
-
-    no_bid_cents = max(1, int(m.no_bid*100))
-    if no_bid_cents < 5:
-        reasons['no_bid_below_5c'] = reasons.get('no_bid_below_5c',0)+1; continue
-
-    reasons['PASSED'] = reasons.get('PASSED',0)+1
-    print(f'PASS: {m.ticker} bid={int(m.yes_bid*100)}c no_bid={no_bid_cents}c vol={int(m.volume)}')
-
-print()
-for r,n in sorted(reasons.items(), key=lambda x:-x[1]):
-    print(f'  {r}: {n}')
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-
-# Show bid distribution
-from collections import Counter
-buckets = Counter()
-for w in watchlist:
-    bid = int(w['market'].yes_bid * 100)
-    if bid >= 90: buckets['90-100c'] += 1
-    elif bid >= 80: buckets['80-90c'] += 1
-    elif bid >= 70: buckets['70-80c'] += 1
-    elif bid >= 60: buckets['60-70c'] += 1
-    else: buckets['<60c'] += 1
-
-print('Bid distribution across watched markets:')
-for k,v in sorted(buckets.items()):
-    print(f'  {k}: {v}')
-
-# Show the highest bids
-top = sorted(watchlist, key=lambda x: x['market'].yes_bid, reverse=True)[:5]
-print()
-print('Top 5 highest YES bids:')
-for w in top:
-    m = w['market']
-    print(f'  {int(m.yes_bid*100)}c  {m.ticker}')
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import _ev, _allowed, _is_prop
-import math
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-
-print(f'Markets with YES bid >= 85c that pass volume/spread gates:')
-print(f'{\"Ticker\":<45} {\"YES\":<5} {\"NO\":<5} {\"Vol\":<8} {\"EV@65%\":>8} {\"EV@60%\":>8} {\"BE%\":>6}')
-print('-'*90)
-
-for w in sorted(watchlist, key=lambda x: x['market'].yes_bid, reverse=True):
-    m = w['market']
-    if m.yes_bid < 0.85: break
-    if not _allowed(m.ticker): continue
-    if _is_prop(m.ticker): continue
-    if m.volume < 8000: continue
-    if m.spread > 3: continue
-
-    no_bid_c = max(1, int(m.no_bid*100))
-    if no_bid_c < 3: continue
-
-    ev65 = _ev(10, no_bid_c, 0.65, is_maker=True)
-    ev60 = _ev(10, no_bid_c, 0.60, is_maker=True)
-
-    # break-even confidence
-    pd = no_bid_c/100
-    fee = math.ceil(0.0175*10*pd*(1-pd)*100)/100 * 2
-    be = (fee/10 + pd)
-
-    print(f'{m.ticker:<45} {int(m.yes_bid*100):>3}c  {no_bid_c:>3}c  {int(m.volume):>7}  {ev65:>8.4f}  {ev60:>8.4f}  {be:>5.1%}')
-"
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-old = '    if m.yes_bid < 0.95: return None # lowered from 0.97 — matches manual trading edge'
-new = '    if m.yes_bid < 0.92: return None # lowered from 0.95 — EV positive at 92c+, BE% < 9%'
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("Threshold lowered to 92c")
-else:
-    print("Pattern not found — checking exact text")
-    idx = content.find('yes_bid < 0.9')
-    print(repr(content[idx-5:idx+60]))
-EOF
-
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-old = '    if m.yes_bid < 0.95: return None'
-new = '    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%'
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("Threshold lowered to 92c")
-else:
-    print("Pattern not found")
-EOF
-
-grep -n "yes_bid < 0" /root/strategies.py | head -5
-echo "Verified"
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot, load_positions
-from strategies import STRATEGIES, ESPNContextCache
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-open_pos = load_positions()
-
-fired = []
-for item in watchlist:
-    for strat in STRATEGIES:
-        try:
-            sig = strat(item, espn_cache=espn_cache)
-            if sig:
-                fired.append((strat.__name__, sig))
-                break
-        except: pass
-
-print(f'Signals fired: {len(fired)}')
-for name, sig in fired:
-    print(f'  {name:<25} {sig.market_ticker:<45} {sig.side} @ {sig.price}c x{sig.contracts} conf={sig.confidence}')
-"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import ESPNContextCache, strategy_value_fade, _allowed, _is_prop
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-# Trace NYK specifically
-for w in watchlist:
-    m = w['market']
-    if 'NYK' not in m.ticker and 'DET' not in m.ticker:
-        continue
-    print(f'Market: {m.ticker}')
-    print(f'  status={w[\"market_status\"]} yes_bid={m.yes_bid} vol={m.volume} spread={m.spread}')
-    print(f'  no_bid={m.no_bid} no_bid_cents={int(m.no_bid*100)}')
-    sig = strategy_value_fade(w, espn_cache=espn_cache)
-    print(f'  signal={sig}')
-    print()
-"
-python3 -c "
+import re
+import time
+import logging
 import requests
-r = requests.get('http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard', timeout=8)
-events = r.json().get('events', [])
-print(f'ESPN events: {len(events)}')
-for e in events[:5]:
-    comps = e.get('competitions', [{}])
-    status = comps[0].get('status', {}).get('type', {})
-    print(f'  {e[\"name\"]} — state={status.get(\"state\")} detail={status.get(\"description\")}')
-"
-grep -n "_is_live\|def _is_live\|status.*active\|live" /root/strategies.py | head -20
-python3 -c "
-import requests
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Dict
 
-# Check a few markets to understand Kalshi status values
-tickers = [
-    'KXNBAGAME-26MAR20NYKBKN-NYK',  # tomorrow game
-    'KXNBAGAME-26MAR19DETWAS-DET',  # tonight finished game
-    'KXNBAGAME-26MAR19CLECHI-CLE',  # tonight finished game
-]
-for t in tickers:
-    r = requests.get(f'https://api.elections.kalshi.com/trade-api/v2/markets/{t}', timeout=8)
-    m = r.json().get('market', {})
-    print(f'{t}')
-    print(f'  status={m.get(\"status\")} close_time={m.get(\"close_time\")} open_time={m.get(\"open_time\")}')
-    print()
-"
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
+log = logging.getLogger("kalshi_bot.confidence")
 
-old = '''def _is_live(status, sport, ticker):
-    if status == "active": return True
-    if sport == "Tennis" and status == "open": return True
-    return False'''
+# ── Cache for back-to-back schedule ──────────────────────────────────────────
+_b2b_cache: Dict = {}
+_b2b_cache_ts: float = 0.0
+B2B_CACHE_TTL = 3600  # refresh once per hour
 
-new = '''def _is_live(status, sport, ticker):
-    # Kalshi "active" just means market is open for trading — not that game is live
-    # Use ESPN context to determine if game is actually in progress
-    # This function now always returns False — live detection is done via ESPN ctx.is_live
-    return False'''
+# ── Cache for injury report ───────────────────────────────────────────────────
+_injury_cache: Dict = {}
+_injury_cache_ts: float = 0.0
+INJURY_CACHE_TTL = 1800  # 30 min
 
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("_is_live fixed — live detection now via ESPN only")
-else:
-    print("Pattern not found")
-EOF
+# ── Price stability tracker ───────────────────────────────────────────────────
+# ticker -> list of (timestamp, yes_bid) tuples
+_price_history: Dict = {}
+PRICE_HISTORY_MAX = 10
 
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-echo "Done"
-sed -n '67,70p' /root/strategies.py
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
 
-old = '''def _is_live(status, sport, ticker):
-    # Kalshi "active" just means market is open for trading — not that game is live
-    # Use ESPN context to determine if game is actually in progress
-    # This function now always returns False — live detection is done via ESPN ctx.is_live
-    return False'''
+def record_price(ticker: str, yes_bid: float):
+    """Call each cycle to build price history."""
+    if ticker not in _price_history:
+        _price_history[ticker] = []
+    _price_history[ticker].append((time.time(), yes_bid))
+    if len(_price_history[ticker]) > PRICE_HISTORY_MAX:
+        _price_history[ticker].pop(0)
 
-new = '''def _is_live(status, sport, ticker, espn_cache=None):
+
+def _get_b2b_teams() -> set:
+    """Return set of team abbreviations playing back-to-back today."""
+    global _b2b_cache, _b2b_cache_ts
+    now = time.time()
+    if _b2b_cache and now - _b2b_cache_ts < B2B_CACHE_TTL:
+        return _b2b_cache
+
+    try:
+        yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).strftime('%Y%m%d')
+        r = requests.get(
+            f'http://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard'
+            f'?dates={yesterday}',
+            timeout=6
+        )
+        r.raise_for_status()
+        events = r.json().get('events', [])
+        played = set()
+        for e in events:
+            comp = e.get('competitions', [{}])[0]
+            for c in comp.get('competitors', []):
+                abbr = c.get('team', {}).get('abbreviation', '')
+                if abbr:
+                    played.add(abbr.upper())
+        _b2b_cache = played
+        _b2b_cache_ts = now
+        log.debug(f"[B2B] {len(played)} teams played yesterday")
+        return played
+    except Exception as e:
+        log.debug(f"[B2B] fetch failed: {e}")
+        return _b2b_cache or set()
+
+
+def _get_injuries() -> Dict:
+    """Return injury report dict {team_abbr: [{"name":..,"status":..}]}"""
+    global _injury_cache, _injury_cache_ts
+    now = time.time()
+    if _injury_cache and now - _injury_cache_ts < INJURY_CACHE_TTL:
+        return _injury_cache
+    try:
+        from nba_injuries import get_injury_report
+        injuries = get_injury_report()
+        _injury_cache = injuries
+        _injury_cache_ts = now
+        return injuries
+    except Exception as e:
+        log.debug(f"[Injuries] fetch failed: {e}")
+        return _injury_cache or {}
+
+
+def _win_rate(wins: int, losses: int) -> float:
+    total = wins + losses
+    return wins / total if total > 0 else 0.5
+
+
+def _price_is_stable(ticker: str, min_cycles: int = 3) -> bool:
+    """True if yes_bid has been at current level for min_cycles."""
+    history = _price_history.get(ticker, [])
+    if len(history) < min_cycles:
+        return False
+    recent = [h[1] for h in history[-min_cycles:]]
+    return max(recent) - min(recent) < 0.02  # within 2c
+
+
+def _price_trend(ticker: str) -> float:
     """
-    Determine if a game is currently in progress.
-    Kalshi 'active' just means the market is open for trading — not that the game is live.
-    We use ESPN ctx.is_live as the source of truth when available.
-    Falls back to False (pre-game assumed) if no ESPN context.
+    Returns price velocity over last 3 cycles.
+    Positive = price moving up (favorite getting stronger).
+    Negative = price moving down (favorite weakening = better fade).
     """
-    if espn_cache is not None:
-        if _is_nba_mlb(ticker) and _NBA_CTX:
-            ctx = find_game_for_ticker(ticker, espn_cache)
-            if ctx is not None:
-                return ctx.is_live
-        if _is_tennis(ticker) and _TENNIS_CTX:
+    history = _price_history.get(ticker, [])
+    if len(history) < 3:
+        return 0.0
+    old = history[-3][1]
+    new = history[-1][1]
+    return round((new - old) * 100, 2)  # in cents
+
+
+def score_nba_mlb(
+    ticker: str,
+    yes_bid: float,
+    espn_ctx,
+    volume: float,
+    spread: float,
+) -> tuple:
+    """
+    Score a value_fade (buy NO) opportunity on NBA/MLB.
+    Returns (confidence: float, reasons: list[str])
+    """
+    score = 0.60
+    reasons = []
+
+    if espn_ctx is None:
+        reasons.append("no ESPN context — base confidence")
+        return round(score, 3), reasons
+
+    # ── Team quality vs market price ─────────────────────────────────────────
+    # Which team is the favorite? The YES side.
+    # We need to figure out which team corresponds to this ticker side
+    fav_wr = None
+
+    # Parse team from ticker
+    from nba_context import parse_prop_ticker
+    parsed = parse_prop_ticker(ticker)
+    team1 = parsed.get("team1", "")
+    team2 = parsed.get("team2", "")
+
+    # Identify favorite team from ESPN context
+    home_abbr = espn_ctx.home.abbreviation.upper()
+    away_abbr = espn_ctx.away.abbreviation.upper()
+
+    # Match ticker team to ESPN home/away
+    fav_team = None
+    if team1 and team1.upper() in (home_abbr, away_abbr):
+        if team1.upper() == home_abbr:
+            fav_team = "home"
+            fav_wr = _win_rate(espn_ctx.home.record_wins, espn_ctx.home.record_loss)
+        else:
+            fav_team = "away"
+            fav_wr = _win_rate(espn_ctx.away.record_wins, espn_ctx.away.record_loss)
+
+    if fav_wr is not None:
+        implied_prob = yes_bid  # market implied probability
+        if fav_wr < implied_prob - 0.10:
+            # Market significantly overpricing this team
+            adj = min(0.07, (implied_prob - fav_wr) * 0.5)
+            score += adj
+            reasons.append(f"team overpriced: win_rate={fav_wr:.0%} vs market={implied_prob:.0%} (+{adj:.2f})")
+        elif fav_wr < implied_prob - 0.05:
+            score += 0.03
+            reasons.append(f"team slightly overpriced: wr={fav_wr:.0%} (+0.03)")
+        else:
+            reasons.append(f"team pricing reasonable: wr={fav_wr:.0%}")
+
+    # ── Home/away adjustment ──────────────────────────────────────────────────
+    # Fading a road favorite is better than fading a home favorite
+    if fav_team == "away":
+        score += 0.02
+        reasons.append("fading road favorite (+0.02)")
+    elif fav_team == "home":
+        score -= 0.01
+        reasons.append("fading home favorite (-0.01)")
+
+    # ── Back-to-back ─────────────────────────────────────────────────────────
+    b2b_teams = _get_b2b_teams()
+    fav_abbr = team1.upper() if team1 else ""
+    if fav_abbr in b2b_teams:
+        score += 0.04
+        reasons.append(f"favorite on back-to-back (+0.04)")
+
+    # ── Injury report ────────────────────────────────────────────────────────
+    injuries = _get_injuries()
+    fav_injuries = injuries.get(fav_abbr, [])
+
+    STAR_NAMES = ["JAMES","CURRY","DURANT","GIANNIS","EMBIID","JOKIC",
+                  "DONCIC","TATUM","BUTLER","EDWARDS","BRUNSON"]
+
+    for inj in fav_injuries:
+        name_upper = inj.get("name","").upper()
+        status = inj.get("status","").upper()
+        for star in STAR_NAMES:
+            if star in name_upper:
+                if "OUT" in status:
+                    score += 0.06
+                    reasons.append(f"star OUT: {inj['name']} (+0.06)")
+                elif "QUESTIONABLE" in status:
+                    score += 0.03
+                    reasons.append(f"star questionable: {inj['name']} (+0.03)")
+                elif "DOUBTFUL" in status:
+                    score += 0.04
+                    reasons.append(f"star doubtful: {inj['name']} (+0.04)")
+
+    # ── Price stability ───────────────────────────────────────────────────────
+    if _price_is_stable(ticker, min_cycles=3):
+        score += 0.02
+        reasons.append("price stable 3+ cycles (+0.02)")
+
+    trend = _price_trend(ticker)
+    if trend < -2:
+        # Price moving down = favorite weakening = better fade
+        score += 0.02
+        reasons.append(f"price weakening {trend:+.1f}c (+0.02)")
+    elif trend > 2:
+        # Price moving up = momentum against us
+        score -= 0.02
+        reasons.append(f"price rising {trend:+.1f}c (-0.02)")
+
+    # ── Volume ───────────────────────────────────────────────────────────────
+    if volume >= 20000:
+        score += 0.02
+        reasons.append("high volume >20k (+0.02)")
+    elif volume < 8000:
+        score -= 0.01
+        reasons.append("thin volume (-0.01)")
+
+    # ── Extreme price boost ───────────────────────────────────────────────────
+    if yes_bid >= 0.98:
+        score += 0.02
+        reasons.append("extreme 98c+ overconfidence (+0.02)")
+    elif yes_bid >= 0.97:
+        score += 0.01
+        reasons.append("97c+ overconfidence (+0.01)")
+
+    # ── Clamp ────────────────────────────────────────────────────────────────
+    score = round(max(0.55, min(0.78, score)), 3)
+    return score, reasons
+
+
+def score_tennis(
+    ticker: str,
+    yes_bid: float,
+    tctx,
+    volume: float,
+    spread: float,
+) -> tuple:
+    """
+    Score a value_fade on tennis.
+    Returns (confidence: float, reasons: list[str])
+    """
+    score = 0.60
+    reasons = []
+
+    if tctx is None:
+        reasons.append("no tennis context — base confidence")
+        return round(score, 3), reasons
+
+    # ── Ranking gap ───────────────────────────────────────────────────────────
+    # Small ranking gap = upset more realistic
+    try:
+        r1 = getattr(tctx, 'p1_rank', 999)
+        r2 = getattr(tctx, 'p2_rank', 999)
+        gap = abs(r1 - r2)
+        if gap < 20:
+            score += 0.04
+            reasons.append(f"close ranking gap {gap} (+0.04)")
+        elif gap < 50:
+            score += 0.02
+            reasons.append(f"moderate ranking gap {gap} (+0.02)")
+        else:
+            reasons.append(f"large ranking gap {gap}")
+    except: pass
+
+    # ── H2H ──────────────────────────────────────────────────────────────────
+    try:
+        h2h = getattr(tctx, 'h2h', '')
+        if h2h and h2h != '?':
+            # Parse "Player 1-0 Opponent" format
+            parts = h2h.split()
+            if len(parts) >= 3:
+                record = parts[-1]
+                wins_losses = record.split('-')
+                if len(wins_losses) == 2:
+                    fav_h2h_wins = int(wins_losses[0])
+                    und_h2h_wins = int(wins_losses[1])
+                    total_h2h = fav_h2h_wins + und_h2h_wins
+                    if total_h2h >= 3:
+                        und_rate = und_h2h_wins / total_h2h
+                        if und_rate >= 0.40:
+                            score += 0.03
+                            reasons.append(f"H2H balanced {record} (+0.03)")
+                        elif und_rate == 0:
+                            score -= 0.02
+                            reasons.append(f"H2H dominated by favorite {record} (-0.02)")
+    except: pass
+
+    # ── Match completion ──────────────────────────────────────────────────────
+    try:
+        pct = tctx.pct_complete if not callable(tctx.pct_complete) else tctx.pct_complete()
+        if pct > 0.85:
+            score -= 0.03
+            reasons.append(f"match nearly over {pct:.0%} (-0.03)")
+        elif pct > 0.60:
+            score -= 0.01
+            reasons.append(f"late match {pct:.0%} (-0.01)")
+    except: pass
+
+    # ── Price signals ─────────────────────────────────────────────────────────
+    if _price_is_stable(ticker, min_cycles=3):
+        score += 0.02
+        reasons.append("price stable (+0.02)")
+
+    if yes_bid >= 0.97:
+        score += 0.02
+        reasons.append("extreme 97c+ (+0.02)")
+
+    if volume >= 8000:
+        score += 0.01
+        reasons.append("good volume (+0.01)")
+
+    # ── Clamp ────────────────────────────────────────────────────────────────
+    score = round(max(0.55, min(0.78, score)), 3)
+    return score, reasons
+
+
+def score_value_fade(item, espn_cache=None) -> tuple:
+    """
+    Main entry point. Call from strategy_value_fade instead of using flat 0.65.
+    Returns (confidence: float, reason_str: str)
+    """
+    m = item["market"]
+    sport = item.get("sport", "")
+    ticker = m.ticker
+    yes_bid = m.yes_bid
+    volume = m.volume
+    spread = m.spread
+
+    # Record price for stability tracking
+    record_price(ticker, yes_bid)
+
+    if sport in ("NBA", "MLB"):
+        from nba_context import find_game_for_ticker
+        ctx = find_game_for_ticker(ticker, espn_cache) if espn_cache else None
+        conf, reasons = score_nba_mlb(ticker, yes_bid, ctx, volume, spread)
+    elif sport == "Tennis":
+        tctx = None
+        try:
             from tennis_context import get_tennis_context
             tctx = get_tennis_context(ticker, espn_cache)
-            if tctx is not None:
-                return tctx.is_live
-    return False  # assume pre-game if no ESPN context'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("_is_live fixed — ESPN is source of truth")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-echo "Done"
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-# All callers currently do: live=_is_live(status, sport, m.ticker)
-# Need to add espn_cache parameter
-old1 = 'live=_is_live(status, sport, m.ticker)'
-new1 = 'live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)'
-count = content.count(old1)
-content = content.replace(old1, new1)
-open('/root/strategies.py', 'w').write(content)
-print(f"Updated {count} _is_live callers")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-echo "Done"
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot, load_positions
-from strategies import STRATEGIES, ESPNContextCache
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-fired = []
-for item in watchlist:
-    for strat in STRATEGIES:
-        try:
-            sig = strat(item, espn_cache=espn_cache)
-            if sig:
-                fired.append((strat.__name__, sig))
-                break
         except: pass
-
-print(f'Signals fired: {len(fired)}')
-for name, sig in fired:
-    print(f'  {name:<25} {sig.market_ticker:<45} {sig.side} @ {sig.price}c x{sig.contracts} conf={sig.confidence}')
-"
-python3 /root/check_stack_v2.py 2>&1 | tail -10
-python kalshi_bot.py
-cd /root
-git add kalshi_bot.py strategies.py price_watcher.py telegram_controller.py morning_report.py models.py check_stack_v2.py README.md tennis_context.py espn_module.py
-git commit -m "fix: live detection, manual position guard, circular imports, hard close, tennis disabled, threshold 92c | $(date -u +'%Y-%m-%d %H:%M UTC')"
-git push origin master
-echo "Pushed"
-screen -r
-pkill -f kalshi_bot.py
-screen -ls | grep Detached | awk '{print $1}' | xargs -I {} screen -S {} -X quit 
-pkill -f kalshi_bot.py
-screen -ls | grep Detached | awk '{print $1}' | xargs -I {} screen -S {} -X quit 
-screen -S kalshi
-grep -n "signal_cooldown\|cooldown" /root/kalshi_bot.py | grep -v "#" | head -20
-sed -n '1675,1700p' /root/kalshi_bot.py
-(kalshi-bot) root@Kalshi-bot:~# sed -n '1675,1700p' /root/kalshi_bot.py
-(kalshi-bot) root@Kalshi-bot:~#
-grep -n "signal_cooldown\|cooldown" /root/kalshi_bot.py | grep -v "#"
-grep -n "run_strategies" /root/kalshi_bot.py
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-# Fix run_strategies signature to accept cooldown
-old = 'def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hit, espn_cache=None):'
-new = 'def run_strategies(watchlist, open_positions, total_pnl, pnl_log, daily_limit_hit, espn_cache=None, signal_cooldown=None):'
-content = content.replace(old, new)
-
-# Fix the call site to pass cooldown
-old2 = 'signals = run_strategies(watchlist_filtered, open_positions, total_pnl, pnl_log, daily_limit_hit or bot_paused, espn_cache=espn_cache)'
-new2 = 'signals = run_strategies(watchlist_filtered, open_positions, total_pnl, pnl_log, daily_limit_hit or bot_paused, espn_cache=espn_cache, signal_cooldown=signal_cooldown)'
-content = content.replace(old2, new2)
-
-open('/root/kalshi_bot.py', 'w').write(content)
-print("Signature and call site updated")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-sed -n '763,780p' /root/kalshi_bot.py
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-old = '''        if ticker in pending_tickers or daily_limit_hit:
-            continue
-        event_ticker = item["event_ticker"]'''
-
-new = '''        if ticker in pending_tickers or daily_limit_hit:
-            continue
-        if signal_cooldown and ticker in signal_cooldown:
-            continue  # cooldown active — skip this ticker
-        event_ticker = item["event_ticker"]'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("Cooldown check added to run_strategies")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-old = '''                if signal.action == "buy":
-                    signal_cooldown[signal.market_ticker] = now_ts + Config.SIGNAL_COOLDOWN_SECS
-                elif signal.action == "sell":
-                    # Block re-entry on any ticker we just exited for 30 min
-                    signal_cooldown[signal.market_ticker] = now_ts + Config.SIGNAL_COOLDOWN_SECS
-                    try:
-                        import json as _j
-                        _atomic_write_json("cooldown.json", signal_cooldown)
-                    except: pass'''
-
-new = '''                if signal.action in ("buy", "sell"):
-                    signal_cooldown[signal.market_ticker] = now_ts + Config.SIGNAL_COOLDOWN_SECS
-                    try:
-                        _atomic_write_json("cooldown.json", signal_cooldown)
-                    except: pass'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("Cooldown written on both buy and sell")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-screen -r
-python3 -c "
-import sys
-sys.path.insert(0, '/root')
-from dotenv import load_dotenv
-load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import STRATEGIES, ESPNContextCache, _is_live, _allowed, _is_prop
-from nba_context import find_game_for_ticker
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-print('='*80)
-print('SPORT DATA FLOW DIAGNOSTIC')
-print('='*80)
-
-# ESPN state
-print()
-print('ESPN CONTEXT:')
-for sport in ['NBA','MLB']:
-    col = espn_cache._all.get(sport)
-    if col:
-        live = col.live()
-        pre  = [g for g in col if g.is_pre]
-        post = [g for g in col if g.is_final]
-        print(f'  {sport}: {len(col)} total | {len(live)} live | {len(pre)} pre-game | {len(post)} final')
-        for g in live[:3]:
-            print(f'    LIVE: {g.away.name} {g.away.score} @ {g.home.name} {g.home.score} | Q{g.period} {g.clock}')
-        for g in pre[:3]:
-            print(f'    PRE:  {g.away.name} @ {g.home.name}')
-
-print()
-print('TENNIS CONTEXT:')
-from tennis_context import _fetch_livescore
-try:
-    matches = _fetch_livescore()
-    print(f'  Live matches: {len(matches)}')
-    for m in matches[:5]:
-        print(f'    {m}')
-except Exception as e:
-    print(f'  Error: {e}')
-
-print()
-print('='*80)
-print('MARKETS BY SPORT:')
-print('='*80)
-
-for sport in ['NBA','Tennis','MLB']:
-    markets = [w for w in watchlist if w['sport']==sport]
-    print(f'\\n{sport}: {len(markets)} markets watched')
-    print(f'  {\"Ticker\":<45} {\"YES\":>5} {\"NO\":>5} {\"Vol\":>8} {\"Status\":<8} {\"ESPN Live\":<10} {\"Signal\"}')
-    print(f'  {\"-\"*100}')
-    for w in sorted(markets, key=lambda x: x['market'].yes_bid, reverse=True)[:10]:
-        m = w['market']
-        # check ESPN live status
-        espn_live = 'N/A'
-        if sport in ('NBA','MLB'):
-            ctx = find_game_for_ticker(m.ticker, espn_cache)
-            espn_live = 'LIVE' if (ctx and ctx.is_live) else ('PRE' if (ctx and ctx.is_pre) else ('FINAL' if ctx else 'no_ctx'))
-
-        fired = None
-        for strat in STRATEGIES:
-            try:
-                sig = strat(w, espn_cache=espn_cache)
-                if sig:
-                    fired = f'{sig.side}@{sig.price}c conf={sig.confidence}'
-                    break
-            except: pass
-
-        print(f'  {m.ticker:<45} {int(m.yes_bid*100):>4}c {int(m.no_bid*100):>4}c {int(m.volume):>8} {w[\"market_status\"]:<8} {espn_live:<10} {fired or \"-\"}')
-"
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from strategies import ESPNContextCache
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-col = espn_cache._all.get('NBA')
-if col and len(col) > 0:
-    g = list(col)[0]
-    print(type(g).__name__)
-    print(sorted([a for a in dir(g) if not a.startswith('_')]))
-    print()
-    print('Sample values:')
-    for a in sorted([a for a in dir(g) if not a.startswith('_')]):
-        try:
-            print(f'  {a} = {getattr(g,a)}')
-        except: pass
-"
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
-from strategies import STRATEGIES, ESPNContextCache
-from nba_context import find_game_for_ticker
-
-snapshot = get_live_sports_snapshot()
-watchlist = analyze_snapshot(snapshot)
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-print('='*80)
-print('ESPN CONTEXT')
-print('='*80)
-for sport in ['NBA','MLB']:
-    col = espn_cache._all.get(sport)
-    if col:
-        live  = [g for g in col if g.is_live]
-        final = [g for g in col if g.is_final]
-        pre   = [g for g in col if not g.is_live and not g.is_final]
-        print(f'{sport}: {len(col)} total | {len(live)} live | {len(pre)} pre | {len(final)} final')
-        for g in live[:3]:
-            print(f'  LIVE:  {g.away.name} {g.away.score} @ {g.home.name} {g.home.score} Q{g.nba_quarter} {g.clock}')
-        for g in pre[:3]:
-            print(f'  PRE:   {g.away.name} @ {g.home.name}')
-        for g in final[:3]:
-            print(f'  FINAL: {g.away.name} {g.away.score} @ {g.home.name} {g.home.score}')
-
-print()
-print('='*80)
-print('SIGNAL TRACE BY SPORT')
-print('='*80)
-for sport in ['NBA','Tennis','MLB']:
-    markets = [w for w in watchlist if w['sport']==sport]
-    fired   = []
-    blocked = {}
-    for w in markets:
-        m = w['market']
-        sig = None
-        for strat in STRATEGIES:
-            try:
-                sig = strat(w, espn_cache=espn_cache)
-                if sig: break
-            except: pass
-        if sig:
-            fired.append((m.ticker, sig))
-        else:
-            # find first blocking reason for top bid markets
-            if m.yes_bid >= 0.85:
-                ctx = find_game_for_ticker(m.ticker, espn_cache) if sport=='NBA' else None
-                espn_state = ('LIVE' if ctx and ctx.is_live else 'FINAL' if ctx and ctx.is_final else 'PRE/NONE') if ctx else 'no_ctx'
-                blocked[m.ticker] = f'bid={int(m.yes_bid*100)}c vol={int(m.volume)} espn={espn_state}'
-
-    print(f'\n{sport}: {len(markets)} markets | {len(fired)} signals fired')
-    for ticker, sig in fired:
-        print(f'  FIRE: {ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence} [{sig.strategy}]')
-    if blocked:
-        print(f'  High-bid markets NOT firing:')
-        for t,r in list(blocked.items())[:5]:
-            print(f'    {t:<45} {r}')
-"
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from strategies import ESPNContextCache
-from nba_context import find_game_for_ticker, parse_prop_ticker
-
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-ticker = 'KXNBAGAME-26MAR19DETWAS-DET'
-parsed = parse_prop_ticker(ticker)
-print('Parsed:', parsed)
-
-col = espn_cache._all.get('NBA')
-print('NBA games in ESPN:')
-for g in col:
-    print(f'  home={g.home.abbreviation} away={g.away.abbreviation} | {g.away.name} @ {g.home.name} | final={g.is_final}')
-
-ctx = find_game_for_ticker(ticker, espn_cache)
-print('Match found:', ctx)
-"
-grep -n "min_vol\|MIN_VOLUME\|8000\|3000\|400" /root/strategies.py | head -15
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from strategies import ESPNContextCache
-from nba_context import find_game_for_ticker
-
-espn_cache = ESPNContextCache()
-espn_cache.refresh(max_age=0)
-
-for ticker in ['KXNBAGAME-26MAR19CLECHI-CLE','KXNBAGAME-26MAR20NYKBKN-NYK']:
-    ctx = find_game_for_ticker(ticker, espn_cache)
-    if ctx:
-        print(f'{ticker}')
-        print(f'  is_live={ctx.is_live} is_final={ctx.is_final} score={ctx.away.score}-{ctx.home.score}')
+        conf, reasons = score_tennis(ticker, yes_bid, tctx, volume, spread)
     else:
-        print(f'{ticker} -> no ESPN context')
-"
+        conf = 0.65
+        reasons = ["unknown sport — base confidence"]
+
+    reason_str = " | ".join(reasons)
+    log.debug(f"[Confidence] {ticker} -> {conf} | {reason_str}")
+    return conf, reason_str
+EOF
+
+echo "confidence_model.py written"
+python3 -c "import ast; ast.parse(open('/root/confidence_model.py').read()); print('Syntax OK')"
+grep -n "conf=0.65\|ctx_reason\|Pre-game fade\|pre-game no ESPN" /root/strategies.py | head -20
+sed -n '360,430p' /root/strategies.py
 python3 << 'EOF'
 content = open('/root/strategies.py').read()
 
 old = '''    conf=0.65
     ctx_reason="no context"
-    if _is_nba_mlb(m.ticker):
-        if _is_prop(m.ticker): return None # never fade props
-        if live:'''
 
-new = '''    conf=0.65
-    ctx_reason="no context"
     if _is_nba_mlb(m.ticker):
-        if _is_prop(m.ticker): return None # never fade props
-        # never enter on a game ESPN has already marked as final
-        if espn_cache is not None:
-            ctx = find_game_for_ticker(m.ticker, espn_cache)
-            if ctx and ctx.is_final:
+        if _is_prop(m.ticker): return None
+        if live:
+            if not _NBA_CTX or not espn_cache:
                 return None
-        if live:'''
+            ctx=find_game_for_ticker(m.ticker, espn_cache)
+            if not ctx:
+                return None
+            if not ctx.is_live:
+                return None
+            # Only Q1 or Q2
+            if ctx.nba_quarter > 2:
+                return None
+            # Tightened: lead must be < 5, not < 8
+            # Lead of 8 in Q1 is already meaningful in NBA — don't fade it
+            if abs(ctx.lead) > 5:
+                return None
+            conf=0.66
+            ctx_reason=f"Live Q{ctx.nba_quarter} lead={ctx.lead} — early game fade"
+        else:
+            if not _NBA_CTX or not espn_cache:
+                conf=0.65; ctx_reason="pre-game no ESPN"
+            else:
+                enter,ctx_conf,ctx_reason=nba_value_fade_check(m.ticker,m.yes_bid,espn_cache)
+                if not enter: return None
+                conf=max(conf,ctx_conf)
+
+    elif _is_tennis(m.ticker):
+        if live and _TENNIS_CTX and espn_cache:
+            tctx=get_tennis_context(m.ticker, espn_cache)
+            if tctx:
+                if tctx.p1_sets > 1 or tctx.p2_sets > 1:
+                    return None
+                conf=min(0.68, tctx.underdog_conf)
+                ctx_reason=f"Tennis live fade: {tctx.summary()}"
+            else:
+                conf=0.65; ctx_reason="tennis live no ctx"
+        else:
+            conf=0.65; ctx_reason="tennis pre-game"
+
+    # Hard confidence floor — must clear 0.63 to proceed
+    if conf < 0.63:
+        return None
+
+    base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.no_bid,0.15)),Config.MAX_CONTRACTS))
+    contracts=_scale_contracts(base_contracts, conf)
+
+    if m.yes_bid>=0.98: conf=min(conf+0.02, 0.72)
+    if m.yes_bid>=0.99: conf=min(conf+0.02, 0.74)
+
+    ev=_ev(contracts,no_bid_cents,conf,is_maker=True)
+    # Raised EV gate from 0.08 to 0.12 — filters marginal fades
+    if ev < 2.0: return None
+
+    return TradeSignal(
+        event_ticker=item["event_ticker"], market_ticker=m.ticker,
+        side="no", action="buy", price=no_bid_cents, contracts=contracts,
+        strategy="value_fade",
+        reason=f"Fade {int(m.yes_bid*100)}c | NO={no_bid_cents}c vol={int(m.volume)} sprd={m.spread}c | {ctx_reason}",
+        confidence=conf,
+    )'''
+
+new = '''    # ── Data-driven confidence scoring ──────────────────────────────────────
+    try:
+        from confidence_model import score_value_fade, record_price
+        record_price(m.ticker, m.yes_bid)
+        conf, ctx_reason = score_value_fade(item, espn_cache=espn_cache)
+    except Exception as _e:
+        log.debug(f"[value_fade] confidence_model failed: {_e} — using base")
+        conf = 0.65
+        ctx_reason = "base confidence"
+
+    # Live NBA/MLB gates — still apply regardless of confidence score
+    if _is_nba_mlb(m.ticker):
+        if _is_prop(m.ticker): return None
+        if live:
+            if not _NBA_CTX or not espn_cache:
+                return None
+            ctx = find_game_for_ticker(m.ticker, espn_cache)
+            if not ctx or not ctx.is_live:
+                return None
+            if ctx.nba_quarter > 2:
+                return None
+            if abs(ctx.lead) > 5:
+                return None
+            ctx_reason = f"Live Q{ctx.nba_quarter} lead={ctx.lead} | {ctx_reason}"
+
+    elif _is_tennis(m.ticker):
+        if live and _TENNIS_CTX and espn_cache:
+            tctx = get_tennis_context(m.ticker, espn_cache)
+            if tctx:
+                if tctx.p1_sets > 1 or tctx.p2_sets > 1:
+                    return None
+                ctx_reason = f"Tennis live | {ctx_reason}"
+
+    # Hard confidence floor
+    if conf < 0.60:
+        log.debug(f"[value_fade] SKIP {m.ticker} — confidence {conf} below floor")
+        return None
+
+    base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.no_bid, 0.01)),
+                                Config.MAX_CONTRACTS))
+    contracts = _scale_contracts(base_contracts, conf)
+
+    ev = _ev(contracts, no_bid_cents, conf, is_maker=True)
+    if ev < 2.0: return None
+
+    return TradeSignal(
+        event_ticker=item["event_ticker"], market_ticker=m.ticker,
+        side="no", action="buy", price=no_bid_cents, contracts=contracts,
+        strategy="value_fade",
+        reason=f"Fade {int(m.yes_bid*100)}c | NO={no_bid_cents}c vol={int(m.volume)} "
+               f"sprd={m.spread}c conf={conf} | {ctx_reason}",
+        confidence=conf,
+    )'''
 
 if old in content:
     content = content.replace(old, new)
     open('/root/strategies.py', 'w').write(content)
-    print("is_final guard added")
+    print("strategy_value_fade wired to confidence_model")
 else:
     print("Pattern not found")
 EOF
 
 python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
 echo "Done"
+python3 << 'PYEOF'
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import STRATEGIES, ESPNContextCache
+from confidence_model import score_value_fade, record_price
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+print("CONFIDENCE MODEL TEST")
+print("="*80)
+
+fired = []
+for item in watchlist:
+    for strat in STRATEGIES:
+        try:
+            sig = strat(item, espn_cache=espn_cache)
+            if sig:
+                fired.append((sig, item))
+                break
+        except Exception as e:
+            pass
+
+print(f"Signals fired: {len(fired)}")
+print()
+for sig, item in fired:
+    print(f"  {sig.market_ticker}")
+    print(f"  {sig.side} @ {sig.price}c x{sig.contracts} conf={sig.confidence}")
+    print(f"  {sig.reason}")
+    print()
+
+# Also show confidence scores for top markets even if not fired
+print("="*80)
+print("CONFIDENCE SCORES — top bid markets:")
+top = sorted(watchlist, key=lambda x: x['market'].yes_bid, reverse=True)[:8]
+for item in top:
+    m = item['market']
+    if m.yes_bid < 0.85: continue
+    record_price(m.ticker, m.yes_bid)
+    conf, reason = score_value_fade(item, espn_cache=espn_cache)
+    print(f"  {m.ticker}")
+    print(f"  bid={int(m.yes_bid*100)}c conf={conf} | {reason}")
+    print()
+PYEOF
+
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import strategy_value_fade, ESPNContextCache
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+for item in watchlist:
+    m = item['market']
+    if 'BOS' not in m.ticker: continue
+    print(f'Market: {m.ticker}')
+    print(f'  yes_bid={m.yes_bid} no_bid={m.no_bid} volume={m.volume} spread={m.spread}')
+    print(f'  status={item[\"market_status\"]}')
+    sig = strategy_value_fade(item, espn_cache=espn_cache)
+    print(f'  signal={sig}')
+    if not sig:
+        # trace why
+        no_bid_c = int(m.no_bid*100)
+        print(f'  no_bid_cents={no_bid_c}')
+        print(f'  volume check: {m.volume} >= 5000? {m.volume >= 5000}')
+        print(f'  spread check: {m.spread} <= 3? {m.spread <= 3}')
+        print(f'  yes_bid check: {m.yes_bid} >= 0.92? {m.yes_bid >= 0.92}')
+"
 python3 << 'EOF'
 content = open('/root/strategies.py').read()
-# Add WTA/ATP specific volume gate — WTA is less liquid
-old = '''    if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 3000 # Q/H winner markets
-    elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 400 # Spring training — lower liquidity is normal
-    else:
-        min_vol = 8000 # Full season NBA/MLB game markets'''
-
-new = '''    if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 3000 # Q/H winner markets
-    elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 400 # Spring training — lower liquidity is normal
-    elif any(m.ticker.startswith(s) for s in ["KXWTAMATCH","KXWTAGAME","KXWTACHALLENGERMATCH"]):
-        min_vol = 5000 # WTA naturally less liquid than ATP
-    else:
-        min_vol = 8000 # Full season NBA/MLB game markets'''
-
+old = '    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%'
+new = '    if m.yes_bid < 0.90: return None  # lowered from 0.92 — confidence model handles quality filter'
 if old in content:
     content = content.replace(old, new)
     open('/root/strategies.py', 'w').write(content)
-    print("WTA volume threshold lowered to 5000")
+    print("Threshold lowered to 90c")
 else:
     print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-grep -n "min_vol = 3000\|min_vol = 400\|min_vol = 8000" /root/strategies.py
-sed -n '319,332p' /root/strategies.py
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-
-old = '''    # Volume gates by market type
-    if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 3000
-    elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 400
-    else:
-        min_vol = 8000'''
-
-new = '''    # Volume gates by market type — at $1-10 position sizes, 3000 vol is ample liquidity
-    if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
-        min_vol = 2000
-    elif m.ticker.startswith("KXMLBSTGAME"):
-        min_vol = 300
-    elif any(m.ticker.startswith(s) for s in ["KXWTAMATCH","KXWTAGAME","KXWTACHALLENGERMATCH"]):
-        min_vol = 4000  # WTA less liquid than ATP
-    else:
-        min_vol = 5000  # NBA/MLB/ATP full game markets'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("Volume gates updated")
-else:
-    print("Pattern not found")
-    # show actual content around that area
-    idx = content.find("Volume gates")
-    print(repr(content[idx:idx+300]))
 EOF
 
 python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
 echo "Done"
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-grep -n "min_vol" /root/strategies.py | head -10
-sed -n '300,320p' /root/strategies.py
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-
-old = '''    live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
-
-    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%'''
-
-new = '''    live=_is_live(status, sport, m.ticker, espn_cache=espn_cache)
-
-    # never enter a position on a game ESPN has already marked as finished
-    if espn_cache is not None and _is_nba_mlb(m.ticker):
-        from nba_context import find_game_for_ticker
-        _ctx = find_game_for_ticker(m.ticker, espn_cache)
-        if _ctx and _ctx.is_final:
-            return None
-
-    if m.yes_bid < 0.92: return None  # lowered from 0.95 — EV positive at 92c+, BE% < 9%'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("is_final guard added")
-else:
-    print("Pattern not found")
-    idx = content.find("_is_live(status, sport")
-    print(repr(content[idx:idx+200]))
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-echo "Done"
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-grep -n "is_final" /root/strategies.py
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
@@ -1021,129 +624,99 @@ for item in watchlist:
         try:
             sig = strat(item, espn_cache=espn_cache)
             if sig:
-                fired.append((strat.__name__, sig, item['sport']))
+                fired.append(sig)
                 break
         except: pass
 
-print(f'Signals fired: {len(fired)}')
-for name, sig, sport in fired:
-    print(f'  [{sport}] {name:<25} {sig.market_ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence} | {sig.reason}')
+print(f'Signals: {len(fired)}')
+for sig in fired:
+    print(f'  {sig.market_ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence}')
+    print(f'  {sig.reason}')
+    print()
 "
-grep -n "timeout\|connect timeout" /root/tennis_context.py | head -10
-grep -n "^TIMEOUT\|^TENNIS_API" /root/tennis_context.py | head -5
-sed -i 's/^TIMEOUT        = 8/TIMEOUT        = 3/' /root/tennis_context.py
-echo "Timeout lowered to 3s"
-grep -n "^TIMEOUT" /root/tennis_context.py
-python3 -c "import ast; ast.parse(open('/root/tennis_context.py').read()); print('Syntax OK')"
-python3 /root/check_stack_v2.py 2>&1 | tail -10
-cd /root && git add kalshi_bot.py strategies.py price_watcher.py telegram_controller.py morning_report.py models.py check_stack_v2.py README.md tennis_context.py espn_module.py && git commit -m "fix: cooldown dedup, is_final guard, volume gates, WTA threshold, tennis timeout, _is_live via ESPN | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
-grep -n "Token or chat\|TELEGRAM\|tg_ctrl" /root/kalshi_bot.py | head -15
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
-from models import Config
-print('TOKEN:', repr(Config.TELEGRAM_TOKEN[:10]) if Config.TELEGRAM_TOKEN else 'EMPTY')
-print('CHAT:', repr(Config.TELEGRAM_CHAT))
-print('KEY_ID:', repr(Config.KALSHI_KEY_ID[:8]) if Config.KALSHI_KEY_ID else 'EMPTY')
-"
-grep -n "load_dotenv\|from models import" /root/kalshi_bot.py | head -5
-head -10 /root/models.py
-python3 << 'EOF'
-content = open('/root/models.py').read()
-old = 'import os\nfrom dataclasses import dataclass, field\nfrom typing import Optional'
-new = 'import os\nfrom dataclasses import dataclass, field\nfrom typing import Optional\nfrom dotenv import load_dotenv\nload_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)\nload_dotenv("/root/.env", override=False)'
-if old in content:
-    content = content.replace(old, new)
-    open('/root/models.py', 'w').write(content)
-    print("load_dotenv added to models.py")
-else:
-    print("Pattern not found")
-EOF
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import strategy_value_fade, ESPNContextCache
+from confidence_model import score_value_fade, record_price
 
-python3 -c "import ast; ast.parse(open('/root/models.py').read()); print('Syntax OK')"
-echo "Verify Config loads correctly..."​​​​​​​​​​​​​​​​
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from models import Config
-print('TOKEN:', 'SET' if Config.TELEGRAM_TOKEN else 'EMPTY')
-print('CHAT:', 'SET' if Config.TELEGRAM_CHAT else 'EMPTY')
-print('KEY_ID:', 'SET' if Config.KALSHI_KEY_ID else 'EMPTY')
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+for item in watchlist:
+    m = item['market']
+    if 'BOS' not in m.ticker: continue
+    print(f'{m.ticker} bid={int(m.yes_bid*100)}c vol={int(m.volume)}')
+    record_price(m.ticker, m.yes_bid)
+    conf, reason = score_value_fade(item, espn_cache)
+    print(f'  conf={conf} reason={reason}')
+    sig = strategy_value_fade(item, espn_cache=espn_cache)
+    print(f'  signal={sig is not None}')
+    if not sig:
+        print(f'  no_bid={m.no_bid} no_bid_cents={int(m.no_bid*100)}')
+        from strategies import _is_stale_high
+        print(f'  stale_high={_is_stale_high(m.ticker, m.yes_bid)}')
+        print(f'  volume>={5000}: {m.volume>=5000}')
+        print(f'  spread<=3: {m.spread<=3}')
+        print(f'  yes_bid>=0.90: {m.yes_bid>=0.90}')
+    print()
 "
-pkill -f kalshi_bot.py
-echo "Stopped"
-sleep 2
-python3 /root/kalshi_bot.py 2>&1 | head -30
-screen -r
-python kalshi_bot.py
-screen -r
-python3 /root/kalshi_bot.py 2>&1 | grep -E "TGCtrl|Telegram|SIGNAL|PLACED|Cycle|Sleeping"
-python3 /root/kalshi_bot.py 2>&1 | grep -E "Timing|TOTAL CYCLE|snapshot|ESPN|Tennis|Sleeping"
-cat /root/cooldown.json
-echo "---"
-cat /root/positions.json
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-from strategies import _fetch_fills_raw_single
+from strategies import _ev
+import math
 
-client = _get_kalshi_client()
-fills = _fetch_fills_raw_single(client)
-nyk = [f for f in fills if 'NYK' in str(f.get('ticker','')) or 'NYKBKN' in str(f.get('ticker',''))]
-print(f'NYK fills: {len(nyk)}')
-for f in nyk:
-    print(f'  {f}')
+# BOS: NO @ 8c, 12 contracts (MAX_POSITION_USD/0.08 = 3.35/0.08 = 41 contracts, capped by MAX_CONTRACTS=100)
+# Actually: int(3.35/0.08) = 41 contracts
+contracts = 41
+price_c = 8
+conf = 0.69
+
+ev = _ev(contracts, price_c, conf, is_maker=True)
+print(f'contracts={contracts} price={price_c}c conf={conf}')
+print(f'EV={ev}')
+print(f'EV >= 2.0? {ev >= 2.0}')
+print()
+
+# Check what _scale_contracts does
+from strategies import _scale_contracts
+base = 41
+scaled = _scale_contracts(base, conf)
+print(f'base_contracts={base} scaled={scaled}')
+ev2 = _ev(scaled, price_c, conf, is_maker=True)
+print(f'EV with scaled contracts={ev2}')
 "
-grep -n "Position recorded\|order_placed\|bot_orders\|placed.*True" /root/kalshi_bot.py | head -20
-sed -n '1075,1100p' /root/kalshi_bot.py
-sed -n '1055,1080p' /root/kalshi_bot.py
-grep -n "reconcile\|Removed\|ADDED\|rm\b" /root/strategies.py | grep -v "#" | head -20
-sed -n '258,272p' /root/strategies.py
+grep -n "def _scale_contracts" /root/strategies.py
+sed -n '/def _scale_contracts/,/^def /p' /root/strategies.py | head -10
 python3 << 'EOF'
 content = open('/root/strategies.py').read()
 
-old = '''    rm=[]
-    for ticker,pos in list(open_positions.items()):
-        if ticker in kt: continue
-        try:
-            r=requests.get(f"{kalshi_base}/markets/{ticker}",timeout=8); r.raise_for_status()
-            ms=r.json().get("market",{}).get("status","")
-            log.info(f"[Reconcile] {'SETTLED' if ms in ('settled','finalized') else 'CLOSED'}: {ticker}")
-        except Exception as e: log.warning(f"[Reconcile] {ticker}:{e}")
-        rm.append(ticker)'''
+old = '''def _scale_contracts(base_contracts, confidence, max_contracts=20):
+    """Scale position size by confidence above 0.63 floor.
+    Tighter floor than before — only meaningful confidence gets a boost."""
+    scale = 1.0 + max(0.0, (confidence - 0.63) / 0.10) * 0.5
+    return max(1, min(int(base_contracts * scale), max_contracts))'''
 
-new = '''    rm=[]
-    for ticker,pos in list(open_positions.items()):
-        if ticker in kt: continue
-        # Check if there is a resting (unfilled) bot order for this ticker
-        # If so, keep the position — the order just hasn't filled yet
-        order_id = pos.get("order_id","")
-        if order_id and bot_orders and order_id in bot_orders:
-            try:
-                import kalshi_python
-                pa = kalshi_python.PortfolioApi(api_client=client)
-                # Check order status via fills — if still resting, skip removal
-                r2 = requests.get(
-                    f"{kalshi_base}/portfolio/orders/{order_id}",
-                    timeout=6)
-                if r2.ok:
-                    order_status = r2.json().get("order",{}).get("status","")
-                    if order_status in ("resting","pending"):
-                        log.info(f"[Reconcile] {ticker} order {order_id} still {order_status} — keeping position")
-                        continue
-            except Exception as e:
-                log.debug(f"[Reconcile] order check {ticker}: {e}")
+new = '''def _scale_contracts(base_contracts, confidence, max_contracts=None):
+    """Scale position size by confidence above 0.60 floor.
+    Uses Config.MAX_CONTRACTS as ceiling unless overridden."""
+    if max_contracts is None:
         try:
-            r=requests.get(f"{kalshi_base}/markets/{ticker}",timeout=8); r.raise_for_status()
-            ms=r.json().get("market",{}).get("status","")
-            log.info(f"[Reconcile] {'SETTLED' if ms in ('settled','finalized') else 'CLOSED'}: {ticker}")
-        except Exception as e: log.warning(f"[Reconcile] {ticker}:{e}")
-        rm.append(ticker)'''
+            from models import Config
+            max_contracts = Config.MAX_CONTRACTS
+        except:
+            max_contracts = 100
+    scale = 1.0 + max(0.0, (confidence - 0.60) / 0.10) * 0.5
+    return max(1, min(int(base_contracts * scale), max_contracts))'''
 
 if old in content:
     content = content.replace(old, new)
     open('/root/strategies.py', 'w').write(content)
-    print("Resting order guard added to reconcile")
+    print("_scale_contracts fixed — uses Config.MAX_CONTRACTS")
 else:
     print("Pattern not found")
 EOF
@@ -1153,836 +726,777 @@ echo "Done"
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client, _kalshi_rest_get
-# check what orders endpoint looks like
-try:
-    data = _kalshi_rest_get('/trade-api/v2/portfolio/orders?limit=3')
-    import json
-    orders = data.get('orders',[])
-    print(f'Orders: {len(orders)}')
-    if orders:
-        print('Sample order keys:', list(orders[0].keys()))
-        print('Sample status:', orders[0].get('status'))
-except Exception as e:
-    print(f'Error: {e}')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import STRATEGIES, ESPNContextCache
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+fired = []
+for item in watchlist:
+    for strat in STRATEGIES:
+        try:
+            sig = strat(item, espn_cache=espn_cache)
+            if sig:
+                fired.append(sig)
+                break
+        except: pass
+
+print(f'Signals: {len(fired)}')
+for sig in fired:
+    print(f'  {sig.market_ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence}')
+    print(f'  {sig.reason[:100]}')
+    print()
 "
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-import kalshi_python
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import strategy_value_fade, ESPNContextCache, _scale_contracts, _ev
+from confidence_model import score_value_fade, record_price
+from models import Config
 
-client = _get_kalshi_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-try:
-    orders = pa.get_orders(limit=5)
-    print(type(orders))
-    print(dir(orders))
-except Exception as e:
-    print(f'Error: {e}')
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+for item in watchlist:
+    m = item['market']
+    if 'BOSMEM-BOS' not in m.ticker: continue
+    print(f'MAX_POSITION_USD={Config.MAX_POSITION_USD}')
+    print(f'MAX_CONTRACTS={Config.MAX_CONTRACTS}')
+    no_bid = m.no_bid
+    print(f'no_bid={no_bid}')
+    base = max(1, min(int(Config.MAX_POSITION_USD / max(no_bid, 0.01)), Config.MAX_CONTRACTS))
+    print(f'base_contracts={base}')
+    record_price(m.ticker, m.yes_bid)
+    conf, reason = score_value_fade(item, espn_cache)
+    print(f'conf={conf}')
+    scaled = _scale_contracts(base, conf)
+    print(f'scaled_contracts={scaled}')
+    ev = _ev(scaled, int(no_bid*100), conf)
+    print(f'ev={ev} >= 2.0? {ev >= 2.0}')
+    sig = strategy_value_fade(item, espn_cache=espn_cache)
+    print(f'signal={sig}')
 "
 python3 -c "
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-import kalshi_python
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import ESPNContextCache, _allowed, _is_prop, _is_nba_mlb, _is_stale_high
+from nba_context import find_game_for_ticker
 
-client = _get_kalshi_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-resp = pa.get_orders(limit=5)
-orders = resp.orders or []
-print(f'Orders: {len(orders)}')
-for o in orders:
-    print(f'  ticker={o.ticker} status={o.status} side={o.side} action={o.action} remaining={o.remaining_count}')
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+for item in watchlist:
+    m = item['market']
+    if 'BOSMEM-BOS' not in m.ticker: continue
+    print('--- Tracing BOSMEM-BOS ---')
+    print(f'_allowed: {_allowed(m.ticker)}')
+    print(f'_is_prop: {_is_prop(m.ticker)}')
+    print(f'_is_nba_mlb: {_is_nba_mlb(m.ticker)}')
+    print(f'_is_stale_high: {_is_stale_high(m.ticker, m.yes_bid)}')
+    print(f'yes_bid >= 0.90: {m.yes_bid >= 0.90}')
+    print(f'no_bid_cents: {int(m.no_bid*100)}')
+    print(f'no_bid >= 5: {int(m.no_bid*100) >= 5}')
+    ctx = find_game_for_ticker(m.ticker, espn_cache)
+    print(f'ESPN ctx: {ctx}')
+    if ctx:
+        print(f'  is_final={ctx.is_final} is_live={ctx.is_live}')
+"
+python3 << 'EOF'
+content = open('/root/nba_context.py').read()
+
+old = '''def find_game_for_ticker(ticker: str, espn_cache) -> Optional[object]:
+    """Find ESPN GameContext matching a Kalshi NBA ticker."""
+    if not espn_cache: return None
+    parsed = parse_prop_ticker(ticker)
+    team1 = parsed.get("team1","")
+    team2 = parsed.get("team2","")
+    if not team1 or not team2: return None
+
+    # Match on abbreviation directly (LAL, GSW etc.) — name substring fails for 3-letter codes
+    nba_col = espn_cache._all.get("NBA")
+    if nba_col:
+        for ctx in nba_col:
+            if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
+                return ctx
+    # fallback: name substring
+    for team in [team1, team2]:
+        ctx = espn_cache.find("NBA", team)
+        if ctx: return ctx
+    return None'''
+
+new = '''def find_game_for_ticker(ticker: str, espn_cache) -> Optional[object]:
+    """Find ESPN GameContext matching a Kalshi NBA ticker.
+    Prefers live/pre-game matches over final games.
+    Falls back to final games only if no active game found.
+    """
+    if not espn_cache: return None
+    parsed = parse_prop_ticker(ticker)
+    team1 = parsed.get("team1","")
+    team2 = parsed.get("team2","")
+    if not team1 or not team2: return None
+
+    nba_col = espn_cache._all.get("NBA")
+    if not nba_col:
+        return None
+
+    # First pass — find live or pre-game match (not final)
+    for ctx in nba_col:
+        if ctx.is_final:
+            continue
+        if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
+            return ctx
+
+    # Second pass — match both teams simultaneously (more precise)
+    for ctx in nba_col:
+        home = ctx.home.abbreviation
+        away = ctx.away.abbreviation
+        if (home in (team1, team2)) and (away in (team1, team2)):
+            return ctx
+
+    # Final fallback — any match including finished games
+    for ctx in nba_col:
+        if ctx.home.abbreviation in (team1, team2) or ctx.away.abbreviation in (team1, team2):
+            return ctx
+
+    return None'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/nba_context.py', 'w').write(content)
+    print("find_game_for_ticker fixed — prefers live/pre-game over final")
+else:
+    print("Pattern not found")
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/nba_context.py').read()); print('Syntax OK')"
+echo "Done"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import STRATEGIES, ESPNContextCache
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+fired = []
+for item in watchlist:
+    for strat in STRATEGIES:
+        try:
+            sig = strat(item, espn_cache=espn_cache)
+            if sig:
+                fired.append(sig)
+                break
+        except: pass
+
+print(f'Signals: {len(fired)}')
+for sig in fired:
+    print(f'  {sig.market_ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence}')
+    print(f'  {sig.reason[:110]}')
+    print()
+"
+grep -n "is_final\|_ctx and _ctx" /root/strategies.py | head -10
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import strategy_value_fade, ESPNContextCache
+from nba_context import find_game_for_ticker
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+for item in watchlist:
+    m = item['market']
+    if 'BOSMEM-BOS' not in m.ticker: continue
+    ctx = find_game_for_ticker(m.ticker, espn_cache)
+    print(f'ctx after fix: {ctx}')
+    print(f'yes_bid={m.yes_bid} in watchlist: {item[\"flag\"]}')
+    sig = strategy_value_fade(item, espn_cache=espn_cache)
+    print(f'signal={sig}')
 "
 python3 << 'EOF'
 content = open('/root/strategies.py').read()
 
-old = '''        order_id = pos.get("order_id","")
-        if order_id and bot_orders and order_id in bot_orders:
-            try:
-                import kalshi_python
-                pa = kalshi_python.PortfolioApi(api_client=client)
-                # Check order status via fills — if still resting, skip removal
-                r2 = requests.get(
-                    f"{kalshi_base}/portfolio/orders/{order_id}",
-                    timeout=6)
-                if r2.ok:
-                    order_status = r2.json().get("order",{}).get("status","")
-                    if order_status in ("resting","pending"):
-                        log.info(f"[Reconcile] {ticker} order {order_id} still {order_status} — keeping position")
-                        continue
-            except Exception as e:
-                log.debug(f"[Reconcile] order check {ticker}: {e}")'''
+old = '''    # never enter a position on a game ESPN has already marked as finished
+    if espn_cache is not None and _is_nba_mlb(m.ticker):
+        from nba_context import find_game_for_ticker
+        _ctx = find_game_for_ticker(m.ticker, espn_cache)
+        if _ctx and _ctx.is_final:
+            return None'''
 
-new = '''        order_id = pos.get("order_id","")
-        if order_id and bot_orders and order_id in bot_orders:
-            try:
-                import kalshi_python
-                pa = kalshi_python.PortfolioApi(api_client=client)
-                resp = pa.get_orders(limit=50)
-                resting = {o.order_id for o in (resp.orders or []) if o.status in ("resting","pending")}
-                if order_id in resting:
-                    log.info(f"[Reconcile] {ticker} order {order_id} still resting — keeping position")
-                    continue
-            except Exception as e:
-                log.debug(f"[Reconcile] order check {ticker}: {e}")'''
+new = '''    # never enter a position on a game ESPN has already marked as finished
+    # only block if BOTH teams in the ticker match the final game (date-specific)
+    if espn_cache is not None and _is_nba_mlb(m.ticker):
+        from nba_context import find_game_for_ticker, parse_prop_ticker
+        _ctx = find_game_for_ticker(m.ticker, espn_cache)
+        if _ctx and _ctx.is_final:
+            # verify it's the same game — both teams must match
+            _parsed = parse_prop_ticker(m.ticker)
+            _t1 = _parsed.get("team1","").upper()
+            _t2 = _parsed.get("team2","").upper()
+            _home = _ctx.home.abbreviation.upper()
+            _away = _ctx.away.abbreviation.upper()
+            _both_match = (_t1 in (_home,_away)) and (_t2 in (_home,_away))
+            if _both_match:
+                return None  # confirmed same game, it's final'''
 
 if old in content:
     content = content.replace(old, new)
     open('/root/strategies.py', 'w').write(content)
-    print("Resting order check updated to use SDK")
+    print("is_final guard fixed — requires both teams to match")
 else:
     print("Pattern not found")
 EOF
 
 python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
 echo "Done"
-python3 << 'EOF'
-import json, time, sys
-sys.path.insert(0, '/root')
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import get_live_sports_snapshot, analyze_snapshot
+from strategies import STRATEGIES, ESPNContextCache
+
+snapshot = get_live_sports_snapshot()
+watchlist = analyze_snapshot(snapshot)
+espn_cache = ESPNContextCache()
+espn_cache.refresh(max_age=0)
+
+fired = []
+for item in watchlist:
+    for strat in STRATEGIES:
+        try:
+            sig = strat(item, espn_cache=espn_cache)
+            if sig:
+                fired.append(sig)
+                break
+        except: pass
+
+print(f'Signals: {len(fired)}')
+for sig in fired:
+    print(f'  {sig.market_ticker:<45} {sig.side}@{sig.price}c x{sig.contracts} conf={sig.confidence}')
+    print(f'  {sig.reason[:110]}')
+    print()
+"
+cd /root && git add -A && git commit -m "feat: confidence_model.py — data-driven scoring (team wr, b2b, injuries, price stability, H2H), is_final guard fixed, find_game_for_ticker prefers live/pre-game, _scale_contracts uses Config.MAX_CONTRACTS, threshold 90c | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
+screen -S kalshi -X quit
+sleep 1
+screen -dmS kalshi python3 /root/kalshi_bot.py
+echo "Restarted"
+sleep 8
+tail -20 /root/kalshi_bot.log
+screen -r
+tail -50 /root/kalshi_bot.log | grep -E "PLACED|Position recorded|SIGNAL|value_fade|conf"
+cat /root/positions.json | python3 -c "
+import json,sys
+p = json.load(sys.stdin)
+print(f'Open positions: {len(p)}')
+for t,v in p.items():
+    print(f'  {t}')
+    print(f'    {v[\"side\"]} @ {v[\"entry_price\"]}c x{v[\"contracts\"]} conf={v.get(\"confidence\",\"?\")} [{v[\"strategy\"]}]')
+"
+grep -E "DET|GEA|Reconcile|Removed|resting" /root/kalshi_bot.log | tail -20
+cat /root/bot_orders.json
+grep -A 15 "DET\|GEA" /root/kalshi_bot.log | grep -A 10 "Position recorded" | head -30
+grep -n "order_id.*order\|\"order_id\"" /root/kalshi_bot.py | head -10
+sed -n '258,278p' /root/strategies.py
+python3 -c "
+import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
 from kalshi_bot import _get_kalshi_client
-import kalshi_python
-from datetime import datetime, timezone
+import kalshi_python, json
 
 client = _get_kalshi_client()
 pa = kalshi_python.PortfolioApi(api_client=client)
 resp = pa.get_orders(limit=50)
-resting = [o for o in (resp.orders or []) if o.status == "resting"]
+resting = [(o.order_id, o.ticker, o.status) for o in (resp.orders or [])]
+print(f'Total orders returned: {len(resting)}')
+print('Resting orders:')
+for oid, ticker, status in resting:
+    if status in ('resting','pending'):
+        print(f'  {ticker} | {oid} | {status}')
 
-print(f"Resting orders: {len(resting)}")
-
-# Load existing files
-positions = {}
-try: positions = json.load(open('/root/positions.json'))
-except: pass
-
-cooldown = {}
-try: cooldown = json.load(open('/root/cooldown.json'))
-except: pass
-
-bot_orders = set()
-try: bot_orders = set(json.load(open('/root/bot_orders.json')))
-except: pass
-
-now_ts = time.time()
-cooldown_secs = 1800
-
-for o in resting:
-    ticker = o.ticker
-    order_id = o.order_id
-    print(f"  {ticker} {o.side} @ {o.yes_price or o.no_price}c — adding to positions + cooldown")
-    
-    # Add to positions if not already there
-    if ticker not in positions:
-        price = int(o.yes_price or o.no_price or 0)
-        positions[ticker] = {
-            "side": o.side,
-            "entry_price": price,
-            "contracts": int(o.client_order_id and 20 or 20),
-            "strategy": "value_fade",
-            "entry_time": datetime.now(timezone.utc).isoformat(),
-            "event_ticker": ticker.rsplit("-", 1)[0],
-            "reason": "resting order on startup",
-            "entry_fee": 0.0,
-            "order_id": order_id,
-            "is_bot": True,
-            "peak_price": price,
-            "last_bid": price,
-        }
-    
-    # Add to cooldown
-    cooldown[ticker] = now_ts + cooldown_secs
-    
-    # Add to bot_orders
-    bot_orders.add(order_id)
-
-# Save all
-json.dump(positions, open('/root/positions.json','w'), indent=2)
-json.dump(cooldown, open('/root/cooldown.json','w'), indent=2)
-json.dump(list(bot_orders), open('/root/bot_orders.json','w'), indent=2)
-
-print(f"\npositions.json: {len(positions)} entries")
-print(f"cooldown.json: {len(cooldown)} entries")
-print(f"bot_orders.json: {len(bot_orders)} entries")
-EOF
-
-screen -ls
-screen -S 156093.kalshi -X quit
-echo "Old screen killed"
-sleep 1
-screen -dmS kalshi python3 /root/kalshi_bot.py
-echo "Bot started in new screen"
-sleep 5
-screen -S kalshi -X hardcopy /tmp/kalshi_out.txt
-cat /tmp/kalshi_out.txt
-screen -r
-screen -S kalshi -X hardcopy /tmp/kalshi_out.txt
-cat /tmp/kalshi_out.txt | grep -E "Cycle|PLACED|cooldown|Loaded|Sleeping|TOTAL CYCLE|resting" | head -20
-tail -30 /root/kalshi_bot.log
-screen -S kalshi -X quit
-echo "Stopped"
-grep -n "_livescore_cache\|_fetch_livescore\|_last_fetch\|_cache" /root/tennis_context.py | head -10
-sed -n '85,100p' /root/tennis_context.py
-python3 << 'EOF'
-content = open('/root/tennis_context.py').read()
-
-old = '''def _fetch_livescore() -> List[dict]:
-    global _livescore_cache
-    now = time.time()
-    if _livescore_cache and now - _livescore_cache.get("ts", 0) < LIVESCORE_TTL:
-        return _livescore_cache["data"]
-    data = _api({"method": "get_livescore"})
-    if data and isinstance(data.get("result"), list):
-        _livescore_cache = {"data": data["result"], "ts": now}
-        log.info(f"[Tennis] Livescore: {len(data['result'])} live matches")
-        return data["result"]
-    return _livescore_cache.get("data", [])'''
-
-new = '''FAILURE_TTL = 60  # cache failures for 60s — don't hammer API on outage
-
-def _fetch_livescore() -> List[dict]:
-    global _livescore_cache
-    now = time.time()
-    last_ts = _livescore_cache.get("ts", 0)
-    last_ok = _livescore_cache.get("ok", True)
-    ttl = LIVESCORE_TTL if last_ok else FAILURE_TTL
-    if _livescore_cache and now - last_ts < ttl:
-        return _livescore_cache.get("data", [])
-    data = _api({"method": "get_livescore"})
-    if data and isinstance(data.get("result"), list):
-        _livescore_cache = {"data": data["result"], "ts": now, "ok": True}
-        log.info(f"[Tennis] Livescore: {len(data['result'])} live matches")
-        return data["result"]
-    # cache the failure so we don't retry for FAILURE_TTL seconds
-    _livescore_cache = {"data": _livescore_cache.get("data", []), "ts": now, "ok": False}
-    return _livescore_cache["data"]'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/tennis_context.py', 'w').write(content)
-    print("Failure caching added to _fetch_livescore")
+bot_orders = set(json.load(open('/root/bot_orders.json')))
+print(f'\nbot_orders.json has {len(bot_orders)} IDs')
+for oid, ticker, status in resting:
+    if status in ('resting','pending'):
+        print(f'  {oid[:8]}... in bot_orders: {oid in bot_orders}')
+"
+python3 -c "
+import json
+orders = json.load(open('/root/bot_orders.json'))
+nyk_id = '83a6b4aa-8f2b-4fc6-86d6-1fc6cf4a9d97'
+if nyk_id not in orders:
+    orders.append(nyk_id)
+    json.dump(orders, open('/root/bot_orders.json','w'), indent=2)
+    print(f'Added NYK order ID. Total: {len(orders)}')
 else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/tennis_context.py').read()); print('Syntax OK')"
-echo "Done"
-grep -n "def _fetch_rankings\|def _fetch_h2h\|def _fetch_standings" /root/tennis_context.py
-sed -n '105,145p' /root/tennis_context.py
-grep -n "RANKINGS_TTL\|LIVESCORE_TTL\|H2H_TTL" /root/tennis_context.py | head -5
-python3 << 'EOF'
-content = open('/root/tennis_context.py').read()
-
-old = '''def _fetch_rankings() -> Dict:
-    global _rankings_cache
-    now = time.time()
-    if _rankings_cache and now - _rankings_cache.get("ts", 0) < RANKINGS_TTL:
-        return _rankings_cache
-    out: Dict = {"ATP": {}, "WTA": {}, "ts": now}
-    for league in ("ATP", "WTA"):
-        data = _api({"method": "get_standings", "event_type": league})
-        if data and isinstance(data.get("result"), list):
-            for entry in data["result"]:
-                try:
-                    name = entry.get("player", "")
-                    rank = int(entry.get("place", 999))
-                    if name:
-                        out[league][name.upper()] = rank
-                except Exception:
-                    pass
-            log.info(f"[Tennis] Rankings: {league} {len(out[league])} players")
-    _rankings_cache = out
-    return out'''
-
-new = '''def _fetch_rankings() -> Dict:
-    global _rankings_cache
-    now = time.time()
-    last_ts = _rankings_cache.get("ts", 0)
-    last_ok = _rankings_cache.get("ok", True)
-    ttl = RANKINGS_TTL if last_ok else FAILURE_TTL
-    if _rankings_cache and now - last_ts < ttl:
-        return _rankings_cache
-    out: Dict = {"ATP": {}, "WTA": {}, "ts": now, "ok": True}
-    any_ok = False
-    for league in ("ATP", "WTA"):
-        data = _api({"method": "get_standings", "event_type": league})
-        if data and isinstance(data.get("result"), list):
-            any_ok = True
-            for entry in data["result"]:
-                try:
-                    name = entry.get("player", "")
-                    rank = int(entry.get("place", 999))
-                    if name:
-                        out[league][name.upper()] = rank
-                except Exception:
-                    pass
-            log.info(f"[Tennis] Rankings: {league} {len(out[league])} players")
-    if not any_ok:
-        # cache failure — keep old data but mark failed
-        _rankings_cache = {**_rankings_cache, "ts": now, "ok": False}
-        return _rankings_cache
-    _rankings_cache = out
-    return out'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/tennis_context.py', 'w').write(content)
-    print("Failure caching added to _fetch_rankings")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/tennis_context.py').read()); print('Syntax OK')"
-echo "Done"
-screen -dmS kalshi python3 /root/kalshi_bot.py
-echo "Started"
-sleep 8
-tail -20 /root/kalshi_bot.log
-screen -r
-tail -40 /root/kalshi_bot.log
+    print('Already present')
+"
+tail -20 /root/kalshi_bot.log | grep -E "Reconcile|resting|keeping|Removed|position"
 cat /root/positions.json | python3 -c "
 import json,sys
 p = json.load(sys.stdin)
 print(f'Positions: {len(p)}')
 for t,v in p.items():
     print(f'  {t}')
-    print(f'    side={v[\"side\"]} entry={v[\"entry_price\"]}c strategy={v[\"strategy\"]} is_bot={v.get(\"is_bot\")}')
+    print(f'    side={v[\"side\"]} entry={v[\"entry_price\"]}c x{v[\"contracts\"]} strategy={v[\"strategy\"]} is_bot={v.get(\"is_bot\")}')
 "
-grep -n "resting\|order_id\|bot_orders" /root/strategies.py | grep -v "#" | head -20
-python3 -c "
-import json
-bot_orders = json.load(open('/root/bot_orders.json'))
-print('bot_orders:', bot_orders)
-print()
-# Check what order IDs the resting orders have
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-import kalshi_python
-client = _get_kalshi_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-resp = pa.get_orders(limit=10)
-for o in (resp.orders or []):
-    if o.status == 'resting':
-        print(f'Resting: {o.ticker} order_id={o.order_id}')
-        print(f'  In bot_orders: {o.order_id in bot_orders}')
-"
-grep -n "load_positions\|reconcile_positions\|purge_stale\|Startup" /root/kalshi_bot.py | head -20
-sed -n '1543,1590p' /root/kalshi_bot.py
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-old = '''    open_positions = load_positions()
-
-    # Start price watcher thread'''
-
-new = '''    open_positions = load_positions()
-
-    # Recover resting orders into positions on startup
-    # Prevents re-entry on unfilled limit orders after restart
-    try:
-        import kalshi_python
-        _pa = kalshi_python.PortfolioApi(api_client=client)
-        _resp = _pa.get_orders(limit=50)
-        _resting = [o for o in (_resp.orders or []) if o.status in ("resting","pending")]
-        _recovered = 0
-        for o in _resting:
-            if o.ticker not in open_positions and o.order_id in _bot_orders:
-                price = int(o.yes_price or o.no_price or 0)
-                open_positions[o.ticker] = {
-                    "side":         o.side,
-                    "entry_price":  price,
-                    "contracts":    int(o.client_order_id and 20 or 20),
-                    "strategy":     "value_fade",
-                    "entry_time":   datetime.now(timezone.utc).isoformat(),
-                    "event_ticker": o.ticker.rsplit("-", 1)[0],
-                    "reason":       "recovered resting order on startup",
-                    "entry_fee":    0.0,
-                    "order_id":     o.order_id,
-                    "is_bot":       True,
-                    "peak_price":   price,
-                    "last_bid":     price,
-                }
-                _recovered += 1
-        if _recovered:
-            save_positions(open_positions)
-            log.info(f"[Startup] Recovered {_recovered} resting order(s) into positions")
-    except Exception as _e:
-        log.warning(f"[Startup] Resting order recovery failed: {_e}")
-
-    # Start price watcher thread'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("Resting order recovery added to startup")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-screen -S kalshi -X quit
-sleep 1
-screen -dmS kalshi python3 /root/kalshi_bot.py
-echo "Restarted"
-sleep 8
-tail -25 /root/kalshi_bot.log
-sleep 30 && cat /root/positions.json | python3 -c "
-import json,sys
-p = json.load(sys.stdin)
-print(f'Positions after reconcile: {len(p)}')
-for t,v in p.items():
-    print(f'  {t}')
-    print(f'    side={v[\"side\"]} entry={v[\"entry_price\"]}c order_id={v.get(\"order_id\",\"none\")[:8]}...')
-"
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-import kalshi_python
-
-client = _get_kalshi_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-resp = pa.get_orders(limit=10)
-for o in (resp.orders or []):
-    if o.status == 'resting':
-        print(f'ticker={o.ticker}')
-        print(f'  side={o.side} action={o.action}')
-        print(f'  yes_price={o.yes_price} no_price={o.no_price}')
-        print(f'  count={o.count} remaining={o.remaining_count}')
-        print(f'  order_id={o.order_id}')
-"
-python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from kalshi_bot import _get_kalshi_client
-import kalshi_python
-
-client = _get_kalshi_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-resp = pa.get_orders(limit=10)
-o = resp.orders[0]
-print('All fields:')
-for field in o.model_fields:
-    val = getattr(o, field, None)
-    if val is not None:
-        print(f'  {field} = {val}')
-"
-python3 << 'EOF'
-content = open('/root/kalshi_bot.py').read()
-
-old = '''                price = int(o.yes_price or o.no_price or 0)
-                open_positions[o.ticker] = {
-                    "side":         o.side,
-                    "entry_price":  price,
-                    "contracts":    int(o.client_order_id and 20 or 20),
-                    "strategy":     "value_fade",
-                    "entry_time":   datetime.now(timezone.utc).isoformat(),
-                    "event_ticker": o.ticker.rsplit("-", 1)[0],
-                    "reason":       "recovered resting order on startup",
-                    "entry_fee":    0.0,
-                    "order_id":     o.order_id,
-                    "is_bot":       True,
-                    "peak_price":   price,
-                    "last_bid":     price,
-                }'''
-
-new = '''                # fetch live market price since SDK doesn't return order price
-                price = 0
-                contracts = 20
-                try:
-                    _mr = requests.get(
-                        f"{Config.KALSHI_BASE}/markets/{o.ticker}", timeout=6)
-                    if _mr.ok:
-                        _md = _mr.json().get("market", {})
-                        if o.side == "no":
-                            price = int(float(_md.get("no_ask_dollars", 0) or 0) * 100)
-                        else:
-                            price = int(float(_md.get("yes_ask_dollars", 0) or 0) * 100)
-                except Exception:
-                    pass
-                open_positions[o.ticker] = {
-                    "side":         o.side,
-                    "entry_price":  price,
-                    "contracts":    contracts,
-                    "strategy":     "value_fade",
-                    "entry_time":   datetime.now(timezone.utc).isoformat(),
-                    "event_ticker": o.ticker.rsplit("-", 1)[0],
-                    "reason":       "recovered resting order on startup",
-                    "entry_fee":    0.0,
-                    "order_id":     o.order_id,
-                    "is_bot":       True,
-                    "peak_price":   price,
-                    "last_bid":     price,
-                }'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/kalshi_bot.py', 'w').write(content)
-    print("Price lookup added to resting order recovery")
-else:
-    print("Pattern not found")
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
-echo "Done"
-python3 -c "
-import sys, json, requests
-sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-
-positions = json.load(open('/root/positions.json'))
-
-for ticker, pos in positions.items():
-    if pos.get('entry_price', 0) == 0:
-        r = requests.get(f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}', timeout=6)
-        if r.ok:
-            m = r.json().get('market', {})
-            side = pos['side']
-            if side == 'no':
-                price = int(float(m.get('no_ask_dollars', 0) or 0) * 100)
-            else:
-                price = int(float(m.get('yes_ask_dollars', 0) or 0) * 100)
-            pos['entry_price'] = price
-            pos['peak_price'] = price
-            pos['last_bid'] = price
-            print(f'Fixed {ticker}: {side} @ {price}c')
-
-json.dump(positions, open('/root/positions.json','w'), indent=2)
-print('Done')
-"
-screen -S kalshi -X quit
-sleep 1
-screen -dmS kalshi python3 /root/kalshi_bot.py
-echo "Restarted"
-sleep 12
-tail -20 /root/kalshi_bot.log
-sleep 35 && cat /root/positions.json | python3 -c "
-import json,sys
-p = json.load(sys.stdin)
-print(f'Positions: {len(p)}')
-for t,v in p.items():
-    print(f'  {t} | side={v[\"side\"]} entry={v[\"entry_price\"]}c is_bot={v.get(\"is_bot\")}')
-" && echo "---" && tail -5 /root/kalshi_bot.log
+python3 /root/kalshi_bot.py -status
+cd /root && git add -A && git commit -m "feat: confidence_model wired, is_final guard fixed, find_game_for_ticker pre-game priority, _scale_contracts uses Config, resting order recovery, b2b detection, injury report | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
+screen -r
 python3 -c "
 import requests
-r = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets/KXNBAGAME-26MAR20NYKBKN-NYK', timeout=6)
+r = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets/KXATPCHALLENGERMATCH-26MAR19MICGEA-MIC', timeout=6)
 m = r.json().get('market',{})
 print('status:', m.get('status'))
-print('close_time:', m.get('close_time'))
 print('result:', m.get('result'))
+print('yes_bid:', float(m.get('yes_bid_dollars',0) or 0)*100, 'c')
+print('no_bid:', float(m.get('no_bid_dollars',0) or 0)*100, 'c')
 "
-python3 -c "
-import requests
-r = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets/KXNBAGAME-26MAR20NYKBKN-NYK', timeout=6)
-m = r.json().get('market',{})
-print('yes_bid:', float(m.get('yes_bid_dollars',0))*100, 'c')
-print('no_bid:', float(m.get('no_bid_dollars',0))*100, 'c')
-print('no_ask:', float(m.get('no_ask_dollars',0))*100, 'c')
-"
-sed -n '350,420p' /root/price_watcher.py
-grep -n "def strategy_exit" /root/strategies.py
-sed -n '600,650p' /root/strategies.py
+grep -n "sets_down\|pct_complete\|live.*tennis\|tennis.*live" /root/strategies.py | head -15
+grep "MICGEA" /root/kalshi_bot.log | head -10
 python3 << 'EOF'
 content = open('/root/strategies.py').read()
 
-old = '''def strategy_exit(item, pos, espn_cache=None):
-    from models import TradeSignal, Config
-    from datetime import datetime, timezone
-    m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
-    contracts=pos["contracts"]; strategy=pos["strategy"]
-    if entry==0: return None
-    if side=="no": return None
-    if pos.get("is_bot") is False: return None  # never auto-exit manual positions
-    bid=max(1,int(m.yes_bid*100))
-    peak=max(bid,pos.get("peak_price",entry))
-    pos["peak_price"]=peak
-    fee_mult=0.0175
-    entry_fee=pos.get("entry_fee",0.0)
-    exit_fee=math.ceil(fee_mult*contracts*(bid/100)*(1-bid/100)*100)/100
-    pnl=(bid-entry)*contracts/100.0-entry_fee-exit_fee
-    if entry<=15: stop=max(1,peak-max(3,int(peak*0.50)))
-    elif pnl>=2.00: stop=int(peak*0.88)
-    elif pnl>=0.50: stop=int(peak*0.82)
-    else: stop=int(entry*0.70)
-    stale=False
-    try:
-        et=pos.get("entry_time","")
-        if et:
-            age=(datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
-            strategy_name=pos.get("strategy","")
-            if "tennis" in strategy_name.lower():
-                stale_min_age = 7200'''
+old = '''    elif _is_tennis(m.ticker):
+        if live and _TENNIS_CTX and espn_cache:
+            tctx = get_tennis_context(m.ticker, espn_cache)
+            if tctx:
+                if tctx.p1_sets > 1 or tctx.p2_sets > 1:
+                    return None
+                ctx_reason = f"Tennis live | {ctx_reason}"'''
 
-new = '''def strategy_exit(item, pos, espn_cache=None):
-    from models import TradeSignal, Config
-    from datetime import datetime, timezone
-    m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
-    contracts=pos["contracts"]; strategy=pos["strategy"]
-    if entry==0: return None
-    if pos.get("is_bot") is False: return None  # never auto-exit manual positions
-
-    # unified exit — works for both YES and NO
-    if side == "yes":
-        bid = max(1, int(m.yes_bid * 100))
-    else:
-        bid = max(1, int(m.no_bid * 100))
-
-    peak = max(bid, pos.get("peak_price", entry))
-    pos["peak_price"] = peak
-
-    fee_mult   = 0.0175
-    entry_fee  = pos.get("entry_fee", 0.0)
-    exit_fee   = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
-    pnl        = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
-
-    # Trail stop — activates once 50% gain achieved (ensures fees covered)
-    trail_active = bid >= entry * 1.5
-    trail_stop   = int(peak * 0.80)
-
-    # Hard stop — 40% loss from entry regardless of trail
-    hard_stop = int(entry * 0.60)
-
-    reason = None
-
-    if trail_active and bid <= trail_stop:
-        reason = f"Trail stop: {bid}c <= {trail_stop}c (peak={peak}c entry={entry}c) PNL=${pnl:.2f}"
-    elif bid <= hard_stop:
-        reason = f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}"
-
-    # stale exit — position hasn't moved and is underwater after fees
-    stale = False
-    try:
-        et = pos.get("entry_time","")
-        if et:
-            age = (datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
-            strategy_name = pos.get("strategy","")
-            if "tennis" in strategy_name.lower():
-                stale_min_age = 7200'''
+new = '''    elif _is_tennis(m.ticker):
+        if live and _TENNIS_CTX and espn_cache:
+            tctx = get_tennis_context(m.ticker, espn_cache)
+            if tctx:
+                if tctx.p1_sets > 1 or tctx.p2_sets > 1:
+                    return None
+                # Don't fade a favorite who is already winning sets
+                # YES side = favorite. If favorite leads in sets, price is correct
+                if tctx.sets_down == 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):
+                    return None  # favorite already won a set — not a fade
+                ctx_reason = f"Tennis live | {ctx_reason}"
+        elif live:
+            return None  # never enter live tennis without context'''
 
 if old in content:
     content = content.replace(old, new)
     open('/root/strategies.py', 'w').write(content)
-    print("strategy_exit updated")
-else:
-    print("Pattern not found")
-    idx = content.find("def strategy_exit")
-    print(repr(content[idx:idx+100]))
-EOF
-
-python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
-sed -n '624,700p' /root/strategies.py
-python3 << 'EOF'
-content = open('/root/strategies.py').read()
-
-old = '''    if not (bid<=stop or stale): return None
-    if stale and bid>stop:
-        reason=f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
-        strat=f"exit_stale_{strategy}"
-    elif pnl>=0.10:
-        reason=f"Trail stop: {bid}c peak={peak}c PNL=${pnl:.2f}"
-        strat=f"exit_trail_{strategy}"
-    else:
-        reason=f"Stop loss: {bid}c<={stop}c entry={entry}c PNL=${pnl:.2f}"
-        strat=f"exit_sl_{strategy}"
-    return TradeSignal(
-        event_ticker=item["event_ticker"], market_ticker=m.ticker,
-        side=side, action="sell", price=bid, contracts=contracts,
-        strategy=strat, reason=reason, confidence=0.80,
-    )'''
-
-new = '''    # stale exit overrides reason if no trail/hard stop triggered
-    if stale and reason is None:
-        reason = f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
-
-    if reason is None:
-        return None
-
-    # determine strategy tag
-    if stale and not trail_active and bid > hard_stop:
-        strat = f"exit_stale_{strategy}"
-    elif trail_active and bid <= trail_stop:
-        strat = f"exit_trail_{strategy}"
-    else:
-        strat = f"exit_sl_{strategy}"
-
-    return TradeSignal(
-        event_ticker=item["event_ticker"], market_ticker=m.ticker,
-        side=side, action="sell", price=bid, contracts=contracts,
-        strategy=strat, reason=reason, confidence=0.80,
-    )'''
-
-if old in content:
-    content = content.replace(old, new)
-    open('/root/strategies.py', 'w').write(content)
-    print("strategy_exit cleanup done")
+    print("Tennis live fade guard added")
 else:
     print("Pattern not found")
 EOF
 
 python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
 echo "Done"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from tennis_context import get_tennis_context
+from strategies import ESPNContextCache
+
+espn_cache = ESPNContextCache()
+
+# Simulate what the context looks like for GEA ticker
+# MICGEA-GEA means YES=GEA wins, NO=Michalski wins
+# sets_down should be from GEA's perspective
+for ticker in ['KXATPCHALLENGERMATCH-26MAR19MICGEA-GEA',
+               'KXATPCHALLENGERMATCH-26MAR19MICGEA-MIC']:
+    try:
+        ctx = get_tennis_context(ticker, espn_cache)
+        if ctx:
+            print(f'{ticker}')
+            print(f'  live={ctx.is_live} sets_down={ctx.sets_down}')
+            print(f'  p1_sets={ctx.p1_sets} p2_sets={ctx.p2_sets}')
+            print(f'  summary: {ctx.summary()}')
+        else:
+            print(f'{ticker} -> no context (match over)')
+    except Exception as e:
+        print(f'{ticker} -> error: {e}')
+"
+grep -n "sets_down\|def.*sets\|p1_sets\|p2_sets" /root/tennis_context.py | head -20
+sed -n '220,270p' /root/tennis_context.py
+sed -n '270,330p' /root/tennis_context.py
+sed -n '330,380p' /root/tennis_context.py
+grep -n "_parse_ticker_players" /root/tennis_context.py
+sed -n '/def _parse_ticker_players/,/^def /p' /root/tennis_context.py | head -30
+python3 << 'EOF'
+content = open('/root/tennis_context.py').read()
+
+old = '''        sets_down  = abs(p1_sets - p2_sets)'''
+
+new = '''        # sets_down = sets the YES/ticker player (p1) has lost
+        # positive means p1 is behind, negative means p1 is ahead
+        # we keep it as p2_sets - p1_sets so positive = p1 losing
+        sets_down  = p2_sets - p1_sets  # positive = YES player losing (underdog situation)'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/tennis_context.py', 'w').write(content)
+    print("sets_down fixed — now direction-aware (positive = YES player losing)")
+else:
+    print("Pattern not found")
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/tennis_context.py').read()); print('Syntax OK')"
+echo "Done"
+grep -n "sets_down" /root/strategies.py
+python3 << 'EOF'
+content = open('/root/strategies.py').read()
+
+# value_fade guard — don't fade if YES player (p1) is already ahead (sets_down <= 0)
+old = '''                total_sets = tctx.p1_sets + tctx.p2_sets
+                if total_sets > 0 and tctx.sets_down == 0:
+                    return None  # favorite is leading in sets — price is correct, don't fade'''
+
+new = '''                total_sets = tctx.p1_sets + tctx.p2_sets
+                if total_sets > 0 and tctx.sets_down <= 0:
+                    return None  # YES player leading or tied — price is correct, don't fade'''
+
+if old in content:
+    content = content.replace(old, new)
+    print("value_fade sets_down guard updated")
+else:
+    print("value_fade pattern not found")
+
+# tennis_underdog guard — sets_down >= 2 means YES player down 2 sets (match nearly over)
+old2 = '    if tctx.sets_down >= 2:'
+new2 = '    if tctx.sets_down >= 2:  # YES player down 2 sets — match nearly lost'
+content = content.replace(old2, new2)
+print("tennis_underdog guard updated")
+
+open('/root/strategies.py', 'w').write(content)
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
+echo "Done"
+grep -n "sets_down\|total_sets\|leading in sets\|price is correct" /root/strategies.py
+sed -i 's/                if tctx.sets_down == 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):/                if tctx.sets_down <= 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):/' /root/strategies.py
+echo "Fixed"
+grep -n "sets_down" /root/strategies.py
+python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
+grep -n "sets_down\|p1_sets\|p2_sets" /root/confidence_model.py
+screen -S kalshi -X quit
+sleep 1
+screen -dmS kalshi python3 /root/kalshi_bot.py
+echo "Restarted"
+cd /root && git add -A && git commit -m "fix: sets_down direction-aware (positive=YES player losing), tennis fade blocked when favorite leading, both-team is_final check | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
+python3 << 'PYEOF'
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from models import Market, TradeSignal
+from strategies import strategy_exit
+from datetime import datetime, timezone, timedelta
+
+def make_pos(side, entry, peak, strategy='value_fade', minutes_ago=45):
+    entry_time = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+    return {
+        'side': side, 'entry_price': entry, 'peak_price': peak,
+        'contracts': 20, 'strategy': strategy,
+        'entry_time': entry_time, 'event_ticker': 'KXATPMATCH-TEST',
+        'entry_fee': 0.02, 'is_bot': True
+    }
+
+def make_tennis_item(yes_bid, no_bid, ticker='KXATPMATCH-TEST-FAV'):
+    m = Market(
+        ticker=ticker, title='Test Tennis',
+        yes_bid=yes_bid/100, yes_ask=(yes_bid+2)/100,
+        no_bid=no_bid/100, no_ask=(no_bid+2)/100,
+        last_price=yes_bid/100, volume=10000, liquidity=500,
+        close_time=None, series='KXATPMATCH', label='ATP Match',
+        market_status='active'
+    )
+    return {
+        'sport': 'Tennis', 'event_ticker': 'KXATPMATCH-TEST',
+        'game_title': 'Test Match', 'market': m,
+        'flag': 'SIGNAL', 'reason': 'test', 'market_status': 'active'
+    }
+
+scenarios = [
+    # Description, side, entry, peak, yes_bid, no_bid, expect_exit
+    # NO positions (fading favorite)
+    ("NO@9c entry, fav moves to 95c (no momentum yet)",         'no', 9,  9,  95,  4,  False),
+    ("NO@9c entry, underdog wins set 1 → NO spikes to 20c",     'no', 9,  20, 80,  18, False),  # not at 3x yet
+    ("NO@9c entry, underdog leads → NO spikes to 28c (3x hit)", 'no', 9,  28, 72,  26, True),   # trail activates at 27c, stop=22c
+    ("NO@9c entry, match tied → NO at 30c, drops to 22c",       'no', 9,  30, 78,  22, True),   # trail stop = 24c, 22<=24
+    ("NO@9c hard stop — fav dominating, NO drops to 5c",        'no', 9,  9,  95,  5,  True),   # 5 <= 9*0.6=5.4
+    ("NO@9c hard stop — fav at 99c, NO at 1c",                  'no', 9,  9,  99,  1,  True),   # 1 <= 5.4
+    # YES positions (bought underdog YES)
+    ("YES@25c entry, underdog winning → spikes to 50c",         'yes',25, 50, 48,  50, False),  # 48 < 25*1.5=37.5? No 48>37.5, trail=40, 48>40 hold
+    ("YES@25c peak=50c, drops to 38c (trail stop)",             'yes',25, 50, 38,  60, True),   # 38 <= 50*0.8=40 TRAIL
+    ("YES@25c hard stop — drops to 14c",                        'yes',25, 25, 14,  84, True),   # 14 <= 25*0.6=15
+    ("YES@25c holding — at 30c, below activation",              'yes',25, 30, 30,  68, False),  # 30 < 37.5 activation
+]
+
+print(f"{'Pass':<5} {'Exit':<6} {'Scenario':<55} {'Reason'}")
+print('-'*110)
+all_pass = True
+for desc, side, entry, peak, yes_bid, no_bid, expect in scenarios:
+    pos = make_pos(side, entry, peak)
+    item = make_tennis_item(yes_bid, no_bid)
+    sig = strategy_exit(item, pos)
+    exited = sig is not None
+    passed = exited == expect
+    if not passed: all_pass = False
+    mark = 'OK  ' if passed else 'FAIL'
+    reason = sig.reason[:45] if sig else 'HOLD'
+    print(f"{mark}  {str(exited):<6} {desc:<55} {reason}")
+
+print()
+print('All passed ✅' if all_pass else 'SOME FAILED ❌')
+PYEOF
+
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from models import Market
+from strategies import strategy_exit
+from datetime import datetime, timezone, timedelta
+
+entry_time = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat()
+pos = {
+    'side': 'no', 'entry_price': 9, 'peak_price': 30,
+    'contracts': 20, 'strategy': 'value_fade',
+    'entry_time': entry_time, 'event_ticker': 'KXATPMATCH-TEST',
+    'entry_fee': 0.02, 'is_bot': True
+}
+m = Market(
+    ticker='KXATPMATCH-TEST-FAV', title='Test',
+    yes_bid=0.78, yes_ask=0.80,
+    no_bid=0.22, no_ask=0.24,
+    last_price=0.78, volume=10000, liquidity=500,
+    close_time=None, series='KXATPMATCH', label='ATP',
+    market_status='active'
+)
+item = {
+    'sport':'Tennis','event_ticker':'KXATPMATCH-TEST',
+    'game_title':'Test','market':m,
+    'flag':'SIGNAL','reason':'test','market_status':'active'
+}
+
+# Manual trace
+bid = max(1, int(m.no_bid*100))
+print(f'bid={bid}')
+print(f'entry=9, peak=30')
+print(f'trail_mult=3.0 (no, entry<=15)')
+print(f'trail_active: {bid} >= {9*3.0} = {bid >= 9*3.0}')
+trail_stop = int(30 * 0.80)
+print(f'trail_stop={trail_stop}')
+print(f'bid<=trail_stop: {bid} <= {trail_stop} = {bid <= trail_stop}')
+hard_stop = int(9 * 0.60)
+print(f'hard_stop={hard_stop}')
+
+sig = strategy_exit(item, pos)
+print(f'signal={sig}')
+"
+python3 << 'EOF'
+content = open('/root/strategies.py').read()
+
+old = '''    # Trail activates as soon as position is profitable after fees
+    # Break-even = entry + (2 * fee / contracts)
+    import math as _math
+    entry_fee_per = _math.ceil(0.0175 * contracts * (entry/100) * (1-entry/100) * 100) / 100
+    exit_fee_per  = _math.ceil(0.0175 * contracts * (entry/100) * (1-entry/100) * 100) / 100
+    total_fees    = entry_fee_per + exit_fee_per
+    breakeven_c   = entry + int(_math.ceil(total_fees / contracts * 100)) + 1
+    trail_active  = bid >= breakeven_c
+    trail_stop    = int(peak * 0.80)'''
+
+new = '''    # Trail activates once position shows at least $0.10 net profit
+    import math as _math
+    entry_fee_per = _math.ceil(0.0175 * contracts * (entry/100) * (1-entry/100) * 100) / 100
+    exit_fee_per  = _math.ceil(0.0175 * contracts * (entry/100) * (1-entry/100) * 100) / 100
+    total_fees    = entry_fee_per + exit_fee_per
+    # cents needed above entry to net $0.10 after fees
+    cents_for_dime = int(_math.ceil((0.10 + total_fees) / contracts * 100)) + 1
+    trail_activation_c = entry + cents_for_dime
+    trail_active  = bid >= trail_activation_c
+    trail_stop    = int(peak * 0.80)'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/strategies.py', 'w').write(content)
+    print("Trail activation set to $0.10 minimum profit")
+else:
+    print("Pattern not found")
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
 python3 << 'EOF'
 content = open('/root/price_watcher.py').read()
 
-old = '''            # ── Tennis: match-state aware logic ───────────────────────────
-            if _is_tennis_ticker(ticker):
-                if self._check_tennis_position(ticker, pos, bid):
-                    continue
-                pos["last_bid"] = bid
-                continue
+old = '''            # Trail activates as soon as position is profitable after fees
+            import math as _math
+            entry_fee_per = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            exit_fee_per  = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            total_fees    = entry_fee_per + exit_fee_per
+            breakeven_c   = entry + int(_math.ceil(total_fees/contracts*100)) + 1
+            trail_active  = bid >= breakeven_c'''
 
-            # ── NBA / MLB: quick profit lock first, then standard logic ───
-            quick_target = int(entry * self.QUICK_PROFIT_MULT)
-            if bid >= quick_target and pnl > 0:
-                self._place_exit(ticker, pos, bid,
-                    f"Quick profit lock: {bid}c >= {quick_target}c (50% on {entry}c) PNL=${pnl:.2f}")
-                continue
-
-            if pnl >= 2.00:
-                stop = int(peak * 0.88)
-                if bid <= stop:
-                    self._place_exit(ticker, pos, bid,
-                        f"Trail exit: ${pnl:.2f} profit, peak={peak}c")
-                    continue
-
-            if bid >= entry * 2.5:
-                self._place_exit(ticker, pos, bid,
-                    f"2.5x exit: {bid}c vs entry {entry}c profit=${pnl:.2f}")
-                continue
-
-            if pnl >= 0.50:
-                stop = int(peak * 0.82)
-                if bid <= stop:
-                    self._place_exit(ticker, pos, bid,
-                        f"Trail exit: ${pnl:.2f} profit, peak={peak}c stop={stop}c")
-                    continue
-
-            if bid <= int(entry * 0.70):
-                self._place_exit(ticker, pos, bid,
-                    f"Stop loss: {bid}c <= {int(entry*0.70)}c (entry={entry}c)")
-                continue
-
-            if bid <= 5 and entry > 15:
-                self._place_exit(ticker, pos, bid, f"Floor exit: {bid}c")
-                continue
-
-            last_bid = pos.get("last_bid", entry)'''
-
-new = '''            # ── Unified exit logic — all sports, both sides ──────────────
-            # Trail activates at 50% gain (ensures fees covered)
-            trail_active = bid >= entry * 1.5
-            trail_stop   = int(peak * 0.80)
-            hard_stop    = int(entry * 0.60)
-
-            if trail_active and bid <= trail_stop:
-                self._place_exit(ticker, pos, bid,
-                    f"Trail stop: {bid}c <= {trail_stop}c peak={peak}c PNL=${pnl:.2f}")
-                continue
-
-            if bid <= hard_stop:
-                self._place_exit(ticker, pos, bid,
-                    f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}")
-                continue
-
-            last_bid = pos.get("last_bid", entry)'''
+new = '''            # Trail activates once position shows at least $0.10 net profit
+            import math as _math
+            entry_fee_per = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            exit_fee_per  = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            total_fees    = entry_fee_per + exit_fee_per
+            cents_for_dime = int(_math.ceil((0.10 + total_fees)/contracts*100)) + 1
+            trail_activation_c = entry + cents_for_dime
+            trail_active  = bid >= trail_activation_c'''
 
 if old in content:
     content = content.replace(old, new)
     open('/root/price_watcher.py', 'w').write(content)
-    print("price_watcher unified exit done")
+    print("price_watcher trail activation updated")
 else:
     print("Pattern not found")
 EOF
 
 python3 -c "import ast; ast.parse(open('/root/price_watcher.py').read()); print('Syntax OK')"
 echo "Done"
+grep -n "trail_active\|trail_activation\|breakeven\|cents_for" /root/strategies.py | head -10
+grep -n "trail_active\|trail_activation\|breakeven\|cents_for" /root/price_watcher.py | head -10
+sed -n '655,670p' /root/strategies.py
+sed -n '380,395p' /root/price_watcher.py
+python3 << 'EOF'
+import math
+
+# Fix strategies.py
+content = open('/root/strategies.py').read()
+old = '''    # Trail activation threshold — side and price aware
+    # NO positions at low prices need more room (3x) to avoid noise exits
+    # YES positions trail tighter (1.5x) since they move faster
+    if side == "no" and entry <= 15:
+        trail_mult = 3.0   # low-price NO: wait for real underdog momentum
+    elif side == "no":
+        trail_mult = 2.0   # higher-price NO: tighter activation
+    else:
+        trail_mult = 1.5   # YES positions: standard activation
+
+    trail_active = bid >= entry * trail_mult
+    trail_stop   = int(peak * 0.80)'''
+
+new = '''    # Trail activates once position shows at least $0.10 net profit
+    import math as _math
+    _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+    _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+    _fees = _ef + _xf
+    _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
+    trail_active = bid >= entry + _cents
+    trail_stop   = int(peak * 0.80)'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/strategies.py', 'w').write(content)
+    print("strategies.py fixed")
+else:
+    print("strategies.py pattern not found")
+
+# Fix price_watcher.py
+content = open('/root/price_watcher.py').read()
+old = '''            if side == "no" and entry <= 15:
+                trail_mult = 3.0   # low-price NO: wait for real momentum
+            elif side == "no":
+                trail_mult = 2.0   # higher-price NO
+            else:
+                trail_mult = 1.5   # YES positions
+
+            trail_active = bid >= entry * trail_mult
+            trail_stop   = int(peak * 0.80)
+            hard_stop    = int(entry * 0.60)'''
+
+new = '''            import math as _math
+            _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
+            _fees = _ef + _xf
+            _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
+            trail_active = bid >= entry + _cents
+            trail_stop   = int(peak * 0.80)
+            hard_stop    = int(entry * 0.60)'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/price_watcher.py', 'w').write(content)
+    print("price_watcher.py fixed")
+else:
+    print("price_watcher.py pattern not found")
+EOF
+
 python3 -c "
-import sys; sys.path.insert(0,'/root')
-from dotenv import load_dotenv; load_dotenv('/root/.env')
-from models import Market
-from strategies import strategy_exit
-
-def make_pos(side, entry, peak, contracts=10):
-    return {'side':side,'entry_price':entry,'peak_price':peak,
-            'contracts':contracts,'strategy':'value_fade',
-            'entry_time':'2024-01-01T00:00:00+00:00',
-            'event_ticker':'TEST','entry_fee':0.02,'is_bot':True}
-
-def make_item(yes_bid, no_bid, ticker='KXATPMATCH-TEST'):
-    m = Market(ticker=ticker,title='Test',yes_bid=yes_bid/100,yes_ask=(yes_bid+2)/100,
-               no_bid=no_bid/100,no_ask=(no_bid+2)/100,last_price=yes_bid/100,
-               volume=10000,liquidity=500,close_time=None,series='KXATPMATCH',
-               label='ATP',market_status='active')
-    return {'sport':'Tennis','event_ticker':'TEST','game_title':'Test',
-            'market':m,'flag':'SIGNAL','reason':'test','market_status':'active'}
-
-tests = [
-    # (side, entry, peak, yes_bid, no_bid, expect_exit, desc)
-    ('no',  5, 40, 92, 7,  False, 'NO peak=40c bid=7c — trail not active yet (7 < 5*1.5=7.5)'),
-    ('no',  5, 40, 92, 8,  True,  'NO peak=40c bid=8c but trail stop=32c — 8<=32 TRAIL'),
-    ('no',  5,  5, 92, 3,  True,  'NO bid=3c hard stop (3 <= 5*0.6=3) HARD STOP'),
-    ('no',  5,  5, 92, 4,  False, 'NO bid=4c no trail active no hard stop — HOLD'),
-    ('yes',70, 90, 68,30,  False, 'YES peak=90c bid=68c trail not active (68 < 70*1.5=105)'),
-    ('yes',50, 90, 65,33,  True,  'YES peak=90c bid=65c trail active (65>=75) stop=72c — TRAIL'),
-    ('yes',50, 50, 30,68,  True,  'YES bid=30c hard stop (30<=30) HARD STOP'),
-]
-
-print(f'{\"Test\":<55} {\"Exit?\":<8} {\"Pass?\"}')
-print('-'*75)
-all_pass = True
-for side, entry, peak, yes_bid, no_bid, expect, desc in tests:
-    pos = make_pos(side, entry, peak)
-    item = make_item(yes_bid, no_bid)
-    sig = strategy_exit(item, pos)
-    exited = sig is not None
-    passed = exited == expect
-    if not passed: all_pass = False
-    mark = '✅' if passed else '❌'
-    reason = sig.reason[:40] if sig else 'HOLD'
-    print(f'{mark} {desc:<55} {str(exited):<8} {reason}')
-
-print()
-print('All passed' if all_pass else 'SOME FAILED')
+import ast
+for f in ['strategies.py','price_watcher.py']:
+    ast.parse(open(f'/root/{f}').read())
+    print(f'{f}: Syntax OK')
 "
 python3 -c "
+import math, sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+
+print(f'Trail activation at \$0.10 profit minimum:')
+print(f'{\"Entry\":<8} {\"Contracts\":<10} {\"Cost\":<8} {\"Activates@\":<12} {\"+cents\":<8} {\"Fees\"}')
+print('-'*55)
+for entry_c, contracts in [(5,67),(6,55),(8,41),(9,20),(12,27),(25,13),(40,8),(50,6)]:
+    ef = math.ceil(0.0175*contracts*(entry_c/100)*(1-entry_c/100)*100)/100
+    xf = math.ceil(0.0175*contracts*(entry_c/100)*(1-entry_c/100)*100)/100
+    fees = ef + xf
+    cents = int(math.ceil((0.10 + fees)/contracts*100)) + 1
+    activation = entry_c + cents
+    cost = entry_c * contracts / 100
+    print(f'{entry_c}c      {contracts:<10} \${cost:.2f}   {activation}c          +{cents}c      \${fees:.3f}')
+"
+python3 << 'PYEOF'
 import sys; sys.path.insert(0,'/root')
 from dotenv import load_dotenv; load_dotenv('/root/.env')
 from models import Market
 from strategies import strategy_exit
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
-def make_pos(side, entry, peak, contracts=10, minutes_ago=30):
-    from datetime import timedelta
+def make_pos(side, entry, peak, contracts=20, minutes_ago=45):
     entry_time = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
     return {'side':side,'entry_price':entry,'peak_price':peak,
             'contracts':contracts,'strategy':'value_fade',
-            'entry_time':entry_time,
-            'event_ticker':'TEST','entry_fee':0.02,'is_bot':True}
+            'entry_time':entry_time,'event_ticker':'KXATPMATCH-TEST',
+            'entry_fee':0.02,'is_bot':True}
 
-def make_item(yes_bid, no_bid, ticker='KXATPMATCH-TEST'):
-    m = Market(ticker=ticker,title='Test',yes_bid=yes_bid/100,yes_ask=(yes_bid+2)/100,
-               no_bid=no_bid/100,no_ask=(no_bid+2)/100,last_price=yes_bid/100,
-               volume=10000,liquidity=500,close_time=None,series='KXATPMATCH',
-               label='ATP',market_status='active')
-    return {'sport':'Tennis','event_ticker':'TEST','game_title':'Test',
-            'market':m,'flag':'SIGNAL','reason':'test','market_status':'active'}
+def make_item(yes_bid, no_bid):
+    m = Market(ticker='KXATPMATCH-TEST-FAV',title='Test',
+               yes_bid=yes_bid/100,yes_ask=(yes_bid+2)/100,
+               no_bid=no_bid/100,no_ask=(no_bid+2)/100,
+               last_price=yes_bid/100,volume=10000,liquidity=500,
+               close_time=None,series='KXATPMATCH',label='ATP',
+               market_status='active')
+    return {'sport':'Tennis','event_ticker':'KXATPMATCH-TEST',
+            'game_title':'Test','market':m,'flag':'SIGNAL',
+            'reason':'test','market_status':'active'}
 
 tests = [
     # side  entry peak  yes  no   expect  desc
-    ('no',  5,  40,  92,  7,  False, 'NO peak=40 bid=7 — below trail activation (7.5) HOLD'),
-    ('no',  5,  40,  92,  8,  True,  'NO peak=40 bid=8 — trail active(8>=7.5) stop=32 TRAIL'),
-    ('no',  5,   5,  92,  3,  True,  'NO bid=3 hard stop (3<=3) STOP'),
-    ('no',  5,   5,  92,  4,  False, 'NO bid=4 no trail no hard stop HOLD'),
-    ('yes',50, 100,  65, 33,  True,  'YES peak=100 bid=65 trail active(65>=75) stop=80 TRAIL'),
-    ('yes',50,  50,  65, 33,  False, 'YES peak=50 bid=65 no trail (65<75) HOLD'),
-    ('yes',50,  50,  30, 68,  True,  'YES bid=30 hard stop (30<=30) STOP'),
+    ('no',  9,  9,  95,  4,  True,  'NO@9c NO=4c hard stop (4<=5)'),
+    ('no',  9,  9,  95,  6,  False, 'NO@9c NO=6c above hard stop, below activation HOLD'),
+    ('no',  9,  9,  95, 11,  True,  'NO@9c NO=11c trail active(11>=11) peak=11 stop=8 TRAIL'),
+    ('no',  9, 20,  80, 15,  True,  'NO@9c peak=20 NO=15c trail active stop=16 — 15<=16 TRAIL'),
+    ('no',  9, 20,  80, 17,  False, 'NO@9c peak=20 NO=17c above trail stop=16 HOLD'),
+    ('no',  9,  9,  99,  1,  True,  'NO@9c NO=1c hard stop'),
+    ('yes',25, 25,  25, 73,  False, 'YES@25c no profit yet HOLD'),
+    ('yes',25, 25,  28, 70,  True,  'YES@25c bid=28 trail active stop=20 — 28>20 HOLD... wait'),
+    ('yes',25, 40,  30, 68,  True,  'YES@25c peak=40 bid=30 trail active stop=32 — 30<=32 TRAIL'),
+    ('yes',25, 25,  14, 84,  True,  'YES@25c hard stop bid=14<=15'),
 ]
 
-print(f'{\"Pass\"} {\"Exit\":<6} {\"Desc\":<55} {\"Reason\"}')
+print(f'{"Pass":<5} {"Exit":<6} {"Desc":<52} {"Reason"}')
 print('-'*100)
 all_pass = True
 for side, entry, peak, yes_bid, no_bid, expect, desc in tests:
@@ -1992,9 +1506,496 @@ for side, entry, peak, yes_bid, no_bid, expect, desc in tests:
     exited = sig is not None
     passed = exited == expect
     if not passed: all_pass = False
-    mark = '✅' if passed else '❌'
-    reason = sig.reason[:45] if sig else 'HOLD'
+    mark = 'OK  ' if passed else 'FAIL'
+    reason = sig.reason[:40] if sig else 'HOLD'
+    print(f'{mark}  {str(exited):<6} {desc:<52} {reason}')
+print()
+print('All passed' if all_pass else 'SOME FAILED')
+PYEOF
+
+python3 << 'EOF'
+content = open('/root/strategies.py').read()
+
+old = '''            if age > stale_min_age and abs(bid-entry) < 4 and pnl < 0.10:'''
+new = '''            if age > stale_min_age and abs(bid-entry) < 4 and pnl < -0.20:'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/strategies.py', 'w').write(content)
+    print("Stale threshold raised: requires >$0.20 loss before stale exit")
+else:
+    print("Pattern not found")
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/strategies.py').read()); print('Syntax OK')"
+python3 << 'PYEOF'
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from models import Market
+from strategies import strategy_exit
+from datetime import datetime, timezone, timedelta
+
+def make_pos(side, entry, peak, contracts=20, minutes_ago=45):
+    entry_time = (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).isoformat()
+    return {'side':side,'entry_price':entry,'peak_price':peak,
+            'contracts':contracts,'strategy':'value_fade',
+            'entry_time':entry_time,'event_ticker':'KXATPMATCH-TEST',
+            'entry_fee':0.02,'is_bot':True}
+
+def make_item(yes_bid, no_bid):
+    m = Market(ticker='KXATPMATCH-TEST-FAV',title='Test',
+               yes_bid=yes_bid/100,yes_ask=(yes_bid+2)/100,
+               no_bid=no_bid/100,no_ask=(no_bid+2)/100,
+               last_price=yes_bid/100,volume=10000,liquidity=500,
+               close_time=None,series='KXATPMATCH',label='ATP',
+               market_status='active')
+    return {'sport':'Tennis','event_ticker':'KXATPMATCH-TEST',
+            'game_title':'Test','market':m,'flag':'SIGNAL',
+            'reason':'test','market_status':'active'}
+
+tests = [
+    ('no',  9,  9,  95,  4, True,  'NO@9c bid=4c hard stop'),
+    ('no',  9,  9,  95,  6, False, 'NO@9c bid=6c no trigger HOLD'),
+    ('no',  9, 11,  89, 11, False, 'NO@9c peak=11 bid=11c trail active but above stop(8) HOLD'),
+    ('no',  9, 20,  80, 15, True,  'NO@9c peak=20 bid=15c trail stop=16 TRAIL'),
+    ('no',  9, 20,  80, 17, False, 'NO@9c peak=20 bid=17c above stop HOLD'),
+    ('no',  9,  9,  99,  1, True,  'NO@9c bid=1c hard stop'),
+    ('yes',25, 25,  25, 73, False, 'YES@25c no profit no trigger HOLD'),
+    ('yes',25, 25,  28, 70, False, 'YES@25c bid=28 trail active peak=25 stop=20 bid>stop HOLD'),
+    ('yes',25, 40,  30, 68, True,  'YES@25c peak=40 bid=30 stop=32 TRAIL'),
+    ('yes',25, 25,  14, 84, True,  'YES@25c hard stop'),
+]
+
+print(f'{"Pass":<5} {"Exit":<6} {"Desc":<55} {"Reason"}')
+print('-'*100)
+all_pass = True
+for side, entry, peak, yes_bid, no_bid, expect, desc in tests:
+    pos = make_pos(side, entry, peak)
+    item = make_item(yes_bid, no_bid)
+    sig = strategy_exit(item, pos)
+    exited = sig is not None
+    passed = exited == expect
+    if not passed: all_pass = False
+    mark = 'OK  ' if passed else 'FAIL'
+    reason = sig.reason[:40] if sig else 'HOLD'
     print(f'{mark}  {str(exited):<6} {desc:<55} {reason}')
 print()
-print('All passed ✅' if all_pass else 'SOME FAILED ❌')
+print('All passed' if all_pass else 'SOME FAILED')
+PYEOF
+
+screen -S kalshi -X quit
+sleep 1
+screen -dmS kalshi python3 /root/kalshi_bot.py
+echo "Restarted"
+cd /root && git add -A && git commit -m "feat: trail activates at \$0.10 profit, stale requires -\$0.20 loss, tennis sets_down direction-aware, all exit tests passing | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
+cat << 'PYEOF' > /root/price_recorder.py
+#!/usr/bin/env python3
+"""
+Records Kalshi market prices every 5 minutes for open positions.
+Builds historical price data for backtesting exit strategies.
+Run in background: screen -dmS recorder python3 /root/price_recorder.py
+"""
+import json, time, requests, csv, os
+from datetime import datetime, timezone
+
+KALSHI_BASE = "https://api.elections.kalshi.com/trade-api/v2"
+OUTPUT_FILE = "/root/price_history.csv"
+INTERVAL    = 300  # 5 minutes
+
+def get_price(ticker, side):
+    try:
+        r = requests.get(f"{KALSHI_BASE}/markets/{ticker}", timeout=6)
+        if r.ok:
+            m = r.json().get("market", {})
+            return {
+                "yes_bid": float(m.get("yes_bid_dollars", 0) or 0) * 100,
+                "no_bid":  float(m.get("no_bid_dollars",  0) or 0) * 100,
+                "volume":  float(m.get("volume_fp", 0) or 0),
+            }
+    except: pass
+    return None
+
+fieldnames = ["timestamp","ticker","side","entry_price","yes_bid","no_bid","volume","pnl_if_exit_now"]
+
+if not os.path.exists(OUTPUT_FILE):
+    with open(OUTPUT_FILE, 'w', newline='') as f:
+        csv.DictWriter(f, fieldnames=fieldnames).writeheader()
+
+print(f"Price recorder started. Writing to {OUTPUT_FILE}")
+
+while True:
+    try:
+        positions = json.load(open("/root/positions.json"))
+        now = datetime.now(timezone.utc).isoformat()
+        rows = []
+        for ticker, pos in positions.items():
+            if not pos.get("is_bot"): continue
+            prices = get_price(ticker, pos["side"])
+            if not prices: continue
+            entry = pos.get("entry_price", 0)
+            side  = pos.get("side", "yes")
+            contracts = pos.get("contracts", 0)
+            bid = prices["no_bid"] if side == "no" else prices["yes_bid"]
+            pnl = (bid - entry) * contracts / 100 if entry else 0
+            rows.append({
+                "timestamp":    now,
+                "ticker":       ticker,
+                "side":         side,
+                "entry_price":  entry,
+                "yes_bid":      prices["yes_bid"],
+                "no_bid":       prices["no_bid"],
+                "volume":       prices["volume"],
+                "pnl_if_exit_now": round(pnl, 4),
+            })
+        if rows:
+            with open(OUTPUT_FILE, 'a', newline='') as f:
+                w = csv.DictWriter(f, fieldnames=fieldnames)
+                for row in rows:
+                    w.writerow(row)
+            print(f"{now[:19]} — recorded {len(rows)} positions")
+    except Exception as e:
+        print(f"Error: {e}")
+    time.sleep(INTERVAL)
+PYEOF
+
+echo "price_recorder.py written"
+screen -dmS recorder python3 /root/price_recorder.py
+echo "Recorder started"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python, json
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_orders(limit=50)
+
+positions = json.load(open('/root/positions.json'))
+
+print('RESTING ORDERS:')
+print('-'*70)
+for o in (resp.orders or []):
+    if o.status in ('resting','pending'):
+        in_pos = o.ticker in positions
+        print(f'  {o.ticker}')
+        print(f'    side={o.side} status={o.status} in_positions={in_pos}')
+
+print()
+print('POSITIONS.JSON:')
+print('-'*70)
+for t,v in positions.items():
+    print(f'  {t}')
+    print(f'    side={v[\"side\"]} entry={v[\"entry_price\"]}c x{v[\"contracts\"]} is_bot={v.get(\"is_bot\")}')
+
+print()
+print(f'Resting orders: {sum(1 for o in (resp.orders or []) if o.status in (\"resting\",\"pending\"))}')
+print(f'Positions tracked: {len(positions)}')
 "
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python, requests
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_orders(limit=50)
+
+KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
+
+print('ALL RESTING ORDERS WITH AMOUNTS:')
+print('-'*80)
+for o in (resp.orders or []):
+    if o.status not in ('resting','pending'): continue
+    # fetch market for current price and payout info
+    try:
+        r = requests.get(f'{KALSHI_BASE}/markets/{o.ticker}', timeout=6)
+        m = r.json().get('market',{})
+        no_bid = float(m.get('no_bid_dollars',0) or 0)*100
+        no_ask = float(m.get('no_ask_dollars',0) or 0)*100
+        yes_bid = float(m.get('yes_bid_dollars',0) or 0)*100
+        status = m.get('status','?')
+    except:
+        no_bid = no_ask = yes_bid = 0
+        status = '?'
+
+    # estimate contracts from order (SDK doesnt return count)
+    # use positions.json if available
+    side = o.side
+    entry_price = no_ask if side=='no' else yes_bid
+    contracts = 20  # bot default
+
+    cost = contracts * entry_price / 100
+    max_payout = contracts * (100 - entry_price) / 100 if side == 'no' else contracts * (100 - entry_price) / 100
+
+    print(f'  {o.ticker}')
+    print(f'    {side.upper()} | market_status={status}')
+    print(f'    current NO: bid={no_bid:.0f}c ask={no_ask:.0f}c | YES: bid={yes_bid:.0f}c')
+    print(f'    est cost=\${cost:.2f} | max_payout=\${max_payout:.2f}')
+    print()
+"
+cat /root/cooldown.json
+echo "---"
+grep "DETWAS\|NYKBKN\|MLBST\|NYY" /root/kalshi_bot.log | grep -E "cooldown|SIGNAL|PLACED" | tail -20
+python3 -c "
+import time
+from datetime import datetime, timezone
+now = time.time()
+stored = 1773928960.174723
+print(f'Now: {now:.0f}')
+print(f'Stored: {stored:.0f}')
+print(f'Stored date: {datetime.fromtimestamp(stored, timezone.utc)}')
+print(f'Expired: {stored < now}')
+"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+# Check why Yankees fired
+import requests
+r = requests.get('https://api.elections.kalshi.com/trade-api/v2/markets/KXMLBSTGAME-26MAR191305BALNYY-NYY', timeout=6)
+m = r.json().get('market',{})
+print('yes_bid:', float(m.get('yes_bid_dollars',0) or 0)*100)
+print('no_bid:', float(m.get('no_bid_dollars',0) or 0)*100)
+print('volume:', m.get('volume_fp'))
+print('status:', m.get('status'))
+print('series:', m.get('ticker','')[:15])
+"
+grep -n "def strategy_mlb_underdog" /root/strategies.py
+sed -n '/def strategy_mlb_underdog/,/^def /p' /root/strategies.py | head -30
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+# Check the BAL side of this game
+import requests
+for ticker in ['KXMLBSTGAME-26MAR191305BALNYY-NYY',
+               'KXMLBSTGAME-26MAR191305BALNYY-BAL']:
+    r = requests.get(f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}', timeout=6)
+    if r.ok:
+        m = r.json().get('market',{})
+        print(f'{ticker}')
+        print(f'  yes_bid={float(m.get(\"yes_bid_dollars\",0) or 0)*100:.0f}c no_bid={float(m.get(\"no_bid_dollars\",0) or 0)*100:.0f}c vol={m.get(\"volume_fp\")}')
+    else:
+        print(f'{ticker}: {r.status_code}')
+"
+grep "BALNYY\|MLBST" /root/kalshi_bot.log | grep -E "PLACED|SIGNAL|value_fade|Strategy"
+cat /root/positions.json | python3 -c "
+import json,sys
+p = json.load(sys.stdin)
+for t,v in p.items():
+    if 'BALNYY' in t or 'MLBST' in t:
+        print(f'{t}')
+        print(f'  entry={v[\"entry_price\"]}c peak={v.get(\"peak_price\",0)}c contracts={v[\"contracts\"]}')
+        print(f'  order_id={v.get(\"order_id\",\"none\")}')
+"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_orders(limit=50)
+
+# Cancel duplicates and stale orders
+seen_tickers = {}
+cancel_ids = []
+
+for o in (resp.orders or []):
+    if o.status not in ('resting','pending'): continue
+    ticker = o.ticker
+    if ticker in seen_tickers:
+        # duplicate — cancel the older one (keep most recent)
+        cancel_ids.append(seen_tickers[ticker])
+        seen_tickers[ticker] = o.order_id
+    else:
+        seen_tickers[ticker] = o.order_id
+
+print(f'Duplicate orders to cancel: {len(cancel_ids)}')
+for oid in cancel_ids:
+    try:
+        pa.cancel_order(order_id=oid)
+        print(f'  Cancelled: {oid[:8]}...')
+    except Exception as e:
+        print(f'  Failed {oid[:8]}: {e}')
+
+print('Done')
+"
+grep -n "def execute_signal\|LIVE ORDER PLACED\|portfolio_api.create_order" /root/kalshi_bot.py | head -10
+sed -n '1045,1070p' /root/kalshi_bot.py
+python3 << 'EOF'
+content = open('/root/kalshi_bot.py').read()
+
+old = '''            with _tt.step("order_placement"):
+                order    = portfolio_api.create_order(
+                    ticker          = signal.market_ticker,
+                    action          = signal.action,
+                    side            = signal.side,
+                    type            = "limit",
+                    yes_price       = _yes_p,
+                    no_price        = _no_p,
+                    count           = int(signal.contracts),
+                    client_order_id = str(uuid.uuid4()),
+                )
+                order_id = order.order.order_id'''
+
+new = '''            with _tt.step("order_placement"):
+                # Cancel any existing resting order on same ticker before placing new one
+                try:
+                    _existing = portfolio_api.get_orders(limit=50)
+                    for _o in (_existing.orders or []):
+                        if _o.ticker == signal.market_ticker and _o.status in ("resting","pending"):
+                            portfolio_api.cancel_order(order_id=_o.order_id)
+                            log.info(f"[Execute] Cancelled stale resting order {_o.order_id[:8]} on {signal.market_ticker}")
+                except Exception as _ce:
+                    log.debug(f"[Execute] Stale order cancel failed: {_ce}")
+
+                order    = portfolio_api.create_order(
+                    ticker          = signal.market_ticker,
+                    action          = signal.action,
+                    side            = signal.side,
+                    type            = "limit",
+                    yes_price       = _yes_p,
+                    no_price        = _no_p,
+                    count           = int(signal.contracts),
+                    client_order_id = str(uuid.uuid4()),
+                )
+                order_id = order.order.order_id'''
+
+if old in content:
+    content = content.replace(old, new)
+    open('/root/kalshi_bot.py', 'w').write(content)
+    print("Duplicate order cancellation added")
+else:
+    print("Pattern not found")
+EOF
+
+python3 -c "import ast; ast.parse(open('/root/kalshi_bot.py').read()); print('Syntax OK')"
+echo "Done"
+python3 -c "
+import json, requests
+positions = json.load(open('/root/positions.json'))
+ticker = 'KXMLBSTGAME-26MAR191305BALNYY-NYY'
+if ticker not in positions:
+    # Add it with correct current price so watcher can manage it
+    r = requests.get(f'https://api.elections.kalshi.com/trade-api/v2/markets/{ticker}', timeout=6)
+    m = r.json().get('market',{})
+    no_bid = int(float(m.get('no_bid_dollars',0) or 0)*100)
+    from datetime import datetime, timezone
+    positions[ticker] = {
+        'side': 'no', 'entry_price': 8, 'peak_price': no_bid,
+        'contracts': 20, 'strategy': 'value_fade',
+        'entry_time': datetime.now(timezone.utc).isoformat(),
+        'event_ticker': ticker.rsplit('-',1)[0],
+        'reason': 'recovered', 'entry_fee': 0.02,
+        'is_bot': True, 'last_bid': no_bid,
+    }
+    json.dump(positions, open('/root/positions.json','w'), indent=2)
+    print(f'Added {ticker} entry=8c current_no={no_bid}c')
+    print(f'Trail should activate immediately (23c >> 8c+2c)')
+else:
+    print('Already in positions')
+"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_orders(limit=50)
+
+for o in (resp.orders or []):
+    if 'BALNYY' in o.ticker:
+        print(f'order_id={o.order_id}')
+        print(f'ticker={o.ticker}')
+        print(f'status={o.status}')
+        print(f'side={o.side}')
+"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+pa.cancel_order(order_id='01fa8997-4591-465b-a95d-c0aa2f117005')
+print('Cancelled resting BALNYY order')
+"
+python3 -c "
+import sys; sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from strategies import _fetch_fills_raw_single
+from kalshi_bot import _get_kalshi_client
+
+client = _get_kalshi_client()
+fills = _fetch_fills_raw_single(client)
+balnyy = [f for f in fills if 'BALNYY' in str(f.get('ticker',''))]
+print(f'BALNYY fills: {len(balnyy)}')
+for f in balnyy:
+    print(f'  action={f.get(\"action\")} side={f.get(\"side\")} count={f.get(\"count_fp\")} price={f.get(\"yes_price_dollars\") or f.get(\"no_price_dollars\")}')
+"
+screen -S kalshi -X quit
+sleep 1
+# Clean up positions to only what we know is real
+python3 -c "
+import json, sys
+sys.path.insert(0,'/root')
+from dotenv import load_dotenv; load_dotenv('/root/.env')
+from kalshi_bot import _get_kalshi_client
+import kalshi_python, requests
+
+client = _get_kalshi_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_orders(limit=50)
+resting = {o.ticker: o.order_id for o in (resp.orders or []) if o.status in ('resting','pending')}
+print(f'Resting orders: {list(resting.keys())}')
+
+# Rebuild positions from resting orders only
+positions = {}
+KALSHI_BASE = 'https://api.elections.kalshi.com/trade-api/v2'
+from datetime import datetime, timezone
+bot_orders = set(json.load(open('/root/bot_orders.json')))
+
+for ticker, oid in resting.items():
+    if oid not in bot_orders:
+        continue
+    r = requests.get(f'{KALSHI_BASE}/markets/{ticker}', timeout=6)
+    m = r.json().get('market',{})
+    no_ask = int(float(m.get('no_ask_dollars',0) or 0)*100)
+    positions[ticker] = {
+        'side': 'no', 'entry_price': no_ask,
+        'peak_price': no_ask, 'last_bid': no_ask,
+        'contracts': 20, 'strategy': 'value_fade',
+        'entry_time': datetime.now(timezone.utc).isoformat(),
+        'event_ticker': ticker.rsplit('-',1)[0],
+        'reason': 'resting order', 'entry_fee': 0.02,
+        'order_id': oid, 'is_bot': True,
+    }
+    print(f'Added {ticker} @ {no_ask}c')
+
+json.dump(positions, open('/root/positions.json','w'), indent=2)
+print(f'Positions rebuilt: {len(positions)}')
+"
+sleep 1
+screen -dmS kalshi python3 /root/kalshi_bot.py
+echo "Restarted"
+sleep 8
+tail -15 /root/kalshi_bot.log
+screen -r
+tail -20 /root/kalshi_bot.log
+cat /root/cooldown.json
+python3 -c "
+import time, json
+from datetime import datetime, timezone
+cd = json.load(open('/root/cooldown.json'))
+now = time.time()
+for ticker, exp in cd.items():
+    remaining = exp - now
+    print(f'{ticker[-20:]}: expires in {remaining/60:.1f} min')
+"
+cd /root && git add -A && git commit -m "fix: cancel stale resting orders before re-entry, cleanup BALNYY, positions rebuilt from resting orders | $(date -u +'%Y-%m-%d %H:%M UTC')" && git push origin master && echo "Pushed"
+python kalshi_bot.py

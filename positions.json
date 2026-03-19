@@ -1,4 +1,30 @@
 {
+  "KXATPMATCH-26MAR17MULBER-MUL": {
+    "side": "yes",
+    "entry_price": 25,
+    "peak_price": 25,
+    "last_bid": 25,
+    "contracts": 72,
+    "strategy": "manual",
+    "entry_time": "2026-03-19T18:24:13.2202Z",
+    "event_ticker": "KXATPMATCH-26MAR17MULBER",
+    "reason": "From fills",
+    "entry_fee": 0.95,
+    "is_bot": false
+  },
+  "KXWTAMATCH-26MAR19LINSWI-LIN": {
+    "side": "yes",
+    "entry_price": 6,
+    "peak_price": 6,
+    "last_bid": 6,
+    "contracts": 172,
+    "strategy": "manual",
+    "entry_time": "2026-03-19T18:33:35.413788Z",
+    "event_ticker": "KXWTAMATCH-26MAR19LINSWI",
+    "reason": "From fills",
+    "entry_fee": 0.68,
+    "is_bot": false
+  },
   "KXWTAMATCH-26MAR19LINSWI-SWI": {
     "side": "no",
     "entry_price": 94,
@@ -10,19 +36,6 @@
     "event_ticker": "KXWTAMATCH-26MAR19LINSWI",
     "reason": "From fills",
     "entry_fee": 0.02,
-    "is_bot": false
-  },
-  "KXWTAMATCH-26MAR18BEJGIB-BEJ": {
-    "side": "yes",
-    "entry_price": 13,
-    "peak_price": 13,
-    "last_bid": 13,
-    "contracts": 21,
-    "strategy": "manual",
-    "entry_time": "2026-03-19T14:46:47.392822Z",
-    "event_ticker": "KXWTAMATCH-26MAR18BEJGIB",
-    "reason": "From fills",
-    "entry_fee": 0.17,
     "is_bot": false
   }
 }

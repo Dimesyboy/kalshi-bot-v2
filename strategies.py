@@ -240,6 +240,12 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
     for ticker,v in net.items():
         if v['net']<=0 or ticker in _settled_cache: continue
         side=v['side']; contracts=v['net']; entry=v['avg_entry']; fees=v['fees']
+
+        # RECONCILE GUARD: skip NO positions entered above 20c — these are data errors
+        # (a NO at 92c means the YES was already at 92c — position was already lost)
+        if side == "no" and entry > 20:
+            log.warning(f"[Reconcile] SKIPPING {ticker} — NO entry at {entry}c is likely a data error")
+            continue
         if ticker not in open_positions:
             try:
                 r=requests.get(f"{kalshi_base}/markets/{ticker}",timeout=8)
