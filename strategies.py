@@ -359,7 +359,7 @@ def strategy_value_fade(item, espn_cache=None):
             if _both_match:
                 return None  # confirmed same game, it's final
 
-    if m.yes_bid < 0.90: return None  # lowered from 0.92 — confidence model handles quality filter
+    if m.yes_bid < 0.82 or m.yes_bid > 0.88: return None  # zone: YES 82-88c = NO 12-18c, confirmed edge zone
 
     # Volume gates by market type — at $1-10 position sizes, 3000 vol is ample liquidity
     if any(m.ticker.startswith(s) for s in ["KXNBA1HWINNER","KXNBA2HWINNER","KXNBA1QWINNER","KXNBA2QWINNER","KXNBA3QWINNER","KXNBA4QWINNER"]):
@@ -375,7 +375,7 @@ def strategy_value_fade(item, espn_cache=None):
     if m.spread > 3: return None
 
     no_bid_cents=max(1,int(m.no_bid*100))
-    if no_bid_cents < 2: return None
+    if no_bid_cents < 12: return None  # floor: YES 82-88c band requires NO >= 12c
 
     # Stale price guard — if market has been pinned at 95c+ for >2 min,
     # the price is likely correct (blowout, game over, etc). Skip it.
