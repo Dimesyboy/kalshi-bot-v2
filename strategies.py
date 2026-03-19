@@ -417,7 +417,7 @@ def strategy_value_fade(item, espn_cache=None):
 
     ev=_ev(contracts,no_bid_cents,conf,is_maker=True)
     # Raised EV gate from 0.08 to 0.12 — filters marginal fades
-    if ev < 0.12: return None
+    if ev < 2.0: return None
 
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
@@ -463,7 +463,7 @@ def strategy_prop_yes(item, espn_cache=None):
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.12: return None
+    if ev < 2.0: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -502,7 +502,7 @@ def strategy_tennis_underdog(item, espn_cache=None):
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.12: return None
+    if ev < 2.0: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -537,7 +537,7 @@ def strategy_quarter_winner(item, espn_cache=None):
     base_contracts=max(1,min(int(Config.MAX_POSITION_USD/max(m.yes_ask,0.01)),Config.MAX_CONTRACTS))
     contracts=_scale_contracts(base_contracts, conf)
     ev=_ev(contracts,price_cents,conf)
-    if ev < 0.12: return None
+    if ev < 2.0: return None
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side="yes", action="buy", price=price_cents, contracts=contracts,
@@ -569,7 +569,7 @@ def strategy_prop_nba(item, espn_cache=None):
     base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.15)), Config.MAX_CONTRACTS))
     contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
-    if ev < 0.12: return None
+    if ev < 2.0: return None
     return TradeSignal(
         event_ticker = item["event_ticker"],
         market_ticker = m.ticker,
@@ -605,7 +605,7 @@ def strategy_mlb_underdog(item, espn_cache=None):
     base_contracts = max(1, min(int(Config.MAX_POSITION_USD / max(m.yes_ask, 0.15)), Config.MAX_CONTRACTS))
     contracts = _scale_contracts(base_contracts, conf)
     ev = _ev(contracts, price_cents, conf)
-    if ev < 0.08: return None  # spring training keeps lower EV bar
+    if ev < 1.0: return None  # spring training lower bar
     return TradeSignal(
         event_ticker = item["event_ticker"],
         market_ticker = m.ticker,
@@ -643,8 +643,17 @@ def strategy_exit(item, pos, espn_cache=None):
     exit_fee   = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
     pnl        = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
 
-    # Trail stop — activates once 50% gain achieved (ensures fees covered)
-    trail_active = bid >= entry * 1.5
+    # Trail activation threshold — side and price aware
+    # NO positions at low prices need more room (3x) to avoid noise exits
+    # YES positions trail tighter (1.5x) since they move faster
+    if side == "no" and entry <= 15:
+        trail_mult = 3.0   # low-price NO: wait for real underdog momentum
+    elif side == "no":
+        trail_mult = 2.0   # higher-price NO: tighter activation
+    else:
+        trail_mult = 1.5   # YES positions: standard activation
+
+    trail_active = bid >= entry * trail_mult
     trail_stop   = int(peak * 0.80)
 
     # Hard stop — 40% loss from entry regardless of trail

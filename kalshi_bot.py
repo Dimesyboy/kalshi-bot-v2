@@ -449,13 +449,15 @@ def get_dynamic_config(client):
         if balance <= 0:
             return Config.MAX_POSITION_USD, Config.MAX_OPEN_POSITIONS
         if balance < 15:
-            pct, max_open = 0.08, 4
+            pct, max_open = 0.05, 3
         elif balance < 50:
-            pct, max_open = 0.08, 5
+            pct, max_open = 0.05, 4
         elif balance < 150:
-            pct, max_open = 0.07, 6
+            pct, max_open = 0.05, 5
+        elif balance < 500:
+            pct, max_open = 0.04, 6
         else:
-            pct, max_open = 0.06, 8
+            pct, max_open = 0.03, 8
         max_pos = round(min(balance * pct, 10.0), 2)
         max_pos = max(max_pos, 0.50)
         Config.MAX_POSITION_USD   = max_pos

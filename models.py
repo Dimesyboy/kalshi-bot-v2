@@ -44,7 +44,7 @@ class Config:
     POSITION_SIZE_PCT   = 0.08
     MAX_POSITION_HARD   = 10.00
     MAX_OPEN_HARD       = 8
-    MAX_CONTRACTS       = 20
+    MAX_CONTRACTS       = 100  # dollar-capped by MAX_POSITION_USD, this is absolute ceiling
     MIN_NO_PRICE        = 5
 
     # -- Overexposure guard ----------------------------------------------------

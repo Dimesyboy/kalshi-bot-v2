@@ -376,8 +376,15 @@ class PriceWatcher:
             pnl = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
 
             # ── Unified exit logic — all sports, both sides ──────────────
-            # Trail activates at 50% gain (ensures fees covered)
-            trail_active = bid >= entry * 1.5
+            # Trail activation is side and price aware
+            if side == "no" and entry <= 15:
+                trail_mult = 3.0   # low-price NO: wait for real momentum
+            elif side == "no":
+                trail_mult = 2.0   # higher-price NO
+            else:
+                trail_mult = 1.5   # YES positions
+
+            trail_active = bid >= entry * trail_mult
             trail_stop   = int(peak * 0.80)
             hard_stop    = int(entry * 0.60)
 
