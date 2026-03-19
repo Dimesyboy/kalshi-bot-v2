@@ -258,6 +258,20 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
     rm=[]
     for ticker,pos in list(open_positions.items()):
         if ticker in kt: continue
+        # Check if there is a resting (unfilled) bot order for this ticker
+        # If so, keep the position — the order just hasn't filled yet
+        order_id = pos.get("order_id","")
+        if order_id and bot_orders and order_id in bot_orders:
+            try:
+                import kalshi_python
+                pa = kalshi_python.PortfolioApi(api_client=client)
+                resp = pa.get_orders(limit=50)
+                resting = {o.order_id for o in (resp.orders or []) if o.status in ("resting","pending")}
+                if order_id in resting:
+                    log.info(f"[Reconcile] {ticker} order {order_id} still resting — keeping position")
+                    continue
+            except Exception as e:
+                log.debug(f"[Reconcile] order check {ticker}: {e}")
         try:
             r=requests.get(f"{kalshi_base}/markets/{ticker}",timeout=8); r.raise_for_status()
             ms=r.json().get("market",{}).get("status","")
@@ -613,25 +627,43 @@ def strategy_exit(item, pos, espn_cache=None):
     m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
     contracts=pos["contracts"]; strategy=pos["strategy"]
     if entry==0: return None
-    if side=="no": return None
     if pos.get("is_bot") is False: return None  # never auto-exit manual positions
-    bid=max(1,int(m.yes_bid*100))
-    peak=max(bid,pos.get("peak_price",entry))
-    pos["peak_price"]=peak
-    fee_mult=0.0175
-    entry_fee=pos.get("entry_fee",0.0)
-    exit_fee=math.ceil(fee_mult*contracts*(bid/100)*(1-bid/100)*100)/100
-    pnl=(bid-entry)*contracts/100.0-entry_fee-exit_fee
-    if entry<=15: stop=max(1,peak-max(3,int(peak*0.50)))
-    elif pnl>=2.00: stop=int(peak*0.88)
-    elif pnl>=0.50: stop=int(peak*0.82)
-    else: stop=int(entry*0.70)
-    stale=False
+
+    # unified exit — works for both YES and NO
+    if side == "yes":
+        bid = max(1, int(m.yes_bid * 100))
+    else:
+        bid = max(1, int(m.no_bid * 100))
+
+    peak = max(bid, pos.get("peak_price", entry))
+    pos["peak_price"] = peak
+
+    fee_mult   = 0.0175
+    entry_fee  = pos.get("entry_fee", 0.0)
+    exit_fee   = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
+    pnl        = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
+
+    # Trail stop — activates once 50% gain achieved (ensures fees covered)
+    trail_active = bid >= entry * 1.5
+    trail_stop   = int(peak * 0.80)
+
+    # Hard stop — 40% loss from entry regardless of trail
+    hard_stop = int(entry * 0.60)
+
+    reason = None
+
+    if trail_active and bid <= trail_stop:
+        reason = f"Trail stop: {bid}c <= {trail_stop}c (peak={peak}c entry={entry}c) PNL=${pnl:.2f}"
+    elif bid <= hard_stop:
+        reason = f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}"
+
+    # stale exit — position hasn't moved and is underwater after fees
+    stale = False
     try:
-        et=pos.get("entry_time","")
+        et = pos.get("entry_time","")
         if et:
-            age=(datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
-            strategy_name=pos.get("strategy","")
+            age = (datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
+            strategy_name = pos.get("strategy","")
             if "tennis" in strategy_name.lower():
                 stale_min_age = 7200
             elif "mlb" in strategy_name.lower():
@@ -641,16 +673,21 @@ def strategy_exit(item, pos, espn_cache=None):
             if age > stale_min_age and abs(bid-entry) < 4 and pnl < 0.10:
                 stale=True
     except: pass
-    if not (bid<=stop or stale): return None
-    if stale and bid>stop:
-        reason=f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
-        strat=f"exit_stale_{strategy}"
-    elif pnl>=0.10:
-        reason=f"Trail stop: {bid}c peak={peak}c PNL=${pnl:.2f}"
-        strat=f"exit_trail_{strategy}"
+    # stale exit — YES positions only, NO positions settle naturally
+    if stale and reason is None and side == "yes":
+        reason = f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
+
+    if reason is None:
+        return None
+
+    # determine strategy tag
+    if stale and not trail_active and bid > hard_stop:
+        strat = f"exit_stale_{strategy}"
+    elif trail_active and bid <= trail_stop:
+        strat = f"exit_trail_{strategy}"
     else:
-        reason=f"Stop loss: {bid}c<={stop}c entry={entry}c PNL=${pnl:.2f}"
-        strat=f"exit_sl_{strategy}"
+        strat = f"exit_sl_{strategy}"
+
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
         side=side, action="sell", price=bid, contracts=contracts,

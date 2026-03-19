@@ -10,6 +10,9 @@ kalshi_bot.py and strategies.py.
 import os
 from dataclasses import dataclass, field
 from typing import Optional
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"), override=False)
+load_dotenv("/root/.env", override=False)
 
 
 class Config:

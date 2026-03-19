@@ -375,46 +375,20 @@ class PriceWatcher:
             exit_fee = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
             pnl = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
 
-            # ── Tennis: match-state aware logic ───────────────────────────
-            if _is_tennis_ticker(ticker):
-                if self._check_tennis_position(ticker, pos, bid):
-                    continue
-                pos["last_bid"] = bid
-                continue
+            # ── Unified exit logic — all sports, both sides ──────────────
+            # Trail activates at 50% gain (ensures fees covered)
+            trail_active = bid >= entry * 1.5
+            trail_stop   = int(peak * 0.80)
+            hard_stop    = int(entry * 0.60)
 
-            # ── NBA / MLB: quick profit lock first, then standard logic ───
-            quick_target = int(entry * self.QUICK_PROFIT_MULT)
-            if bid >= quick_target and pnl > 0:
+            if trail_active and bid <= trail_stop:
                 self._place_exit(ticker, pos, bid,
-                    f"Quick profit lock: {bid}c >= {quick_target}c (50% on {entry}c) PNL=${pnl:.2f}")
+                    f"Trail stop: {bid}c <= {trail_stop}c peak={peak}c PNL=${pnl:.2f}")
                 continue
 
-            if pnl >= 2.00:
-                stop = int(peak * 0.88)
-                if bid <= stop:
-                    self._place_exit(ticker, pos, bid,
-                        f"Trail exit: ${pnl:.2f} profit, peak={peak}c")
-                    continue
-
-            if bid >= entry * 2.5:
+            if bid <= hard_stop:
                 self._place_exit(ticker, pos, bid,
-                    f"2.5x exit: {bid}c vs entry {entry}c profit=${pnl:.2f}")
-                continue
-
-            if pnl >= 0.50:
-                stop = int(peak * 0.82)
-                if bid <= stop:
-                    self._place_exit(ticker, pos, bid,
-                        f"Trail exit: ${pnl:.2f} profit, peak={peak}c stop={stop}c")
-                    continue
-
-            if bid <= int(entry * 0.70):
-                self._place_exit(ticker, pos, bid,
-                    f"Stop loss: {bid}c <= {int(entry*0.70)}c (entry={entry}c)")
-                continue
-
-            if bid <= 5 and entry > 15:
-                self._place_exit(ticker, pos, bid, f"Floor exit: {bid}c")
+                    f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}")
                 continue
 
             last_bid = pos.get("last_bid", entry)

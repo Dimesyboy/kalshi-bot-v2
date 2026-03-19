@@ -82,28 +82,40 @@ def _api(params: dict) -> Optional[dict]:
         return None
 
 
+FAILURE_TTL = 60  # cache failures for 60s — don't hammer API on outage
+
 def _fetch_livescore() -> List[dict]:
     global _livescore_cache
     now = time.time()
-    if _livescore_cache and now - _livescore_cache.get("ts", 0) < LIVESCORE_TTL:
-        return _livescore_cache["data"]
+    last_ts = _livescore_cache.get("ts", 0)
+    last_ok = _livescore_cache.get("ok", True)
+    ttl = LIVESCORE_TTL if last_ok else FAILURE_TTL
+    if _livescore_cache and now - last_ts < ttl:
+        return _livescore_cache.get("data", [])
     data = _api({"method": "get_livescore"})
     if data and isinstance(data.get("result"), list):
-        _livescore_cache = {"data": data["result"], "ts": now}
+        _livescore_cache = {"data": data["result"], "ts": now, "ok": True}
         log.info(f"[Tennis] Livescore: {len(data['result'])} live matches")
         return data["result"]
-    return _livescore_cache.get("data", [])
+    # cache the failure so we don't retry for FAILURE_TTL seconds
+    _livescore_cache = {"data": _livescore_cache.get("data", []), "ts": now, "ok": False}
+    return _livescore_cache["data"]
 
 
 def _fetch_rankings() -> Dict:
     global _rankings_cache
     now = time.time()
-    if _rankings_cache and now - _rankings_cache.get("ts", 0) < RANKINGS_TTL:
+    last_ts = _rankings_cache.get("ts", 0)
+    last_ok = _rankings_cache.get("ok", True)
+    ttl = RANKINGS_TTL if last_ok else FAILURE_TTL
+    if _rankings_cache and now - last_ts < ttl:
         return _rankings_cache
-    out: Dict = {"ATP": {}, "WTA": {}, "ts": now}
+    out: Dict = {"ATP": {}, "WTA": {}, "ts": now, "ok": True}
+    any_ok = False
     for league in ("ATP", "WTA"):
         data = _api({"method": "get_standings", "event_type": league})
         if data and isinstance(data.get("result"), list):
+            any_ok = True
             for entry in data["result"]:
                 try:
                     name = entry.get("player", "")
@@ -113,6 +125,10 @@ def _fetch_rankings() -> Dict:
                 except Exception:
                     pass
             log.info(f"[Tennis] Rankings: {league} {len(out[league])} players")
+    if not any_ok:
+        # cache failure — keep old data but mark failed
+        _rankings_cache = {**_rankings_cache, "ts": now, "ok": False}
+        return _rankings_cache
     _rankings_cache = out
     return out
 

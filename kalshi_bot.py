@@ -1547,6 +1547,51 @@ def run_bot():
     pnl_log        = load_pnl_log()
     open_positions = load_positions()
 
+    # Recover resting orders into positions on startup
+    # Prevents re-entry on unfilled limit orders after restart
+    try:
+        import kalshi_python
+        _pa = kalshi_python.PortfolioApi(api_client=client)
+        _resp = _pa.get_orders(limit=50)
+        _resting = [o for o in (_resp.orders or []) if o.status in ("resting","pending")]
+        _recovered = 0
+        for o in _resting:
+            if o.ticker not in open_positions and o.order_id in _bot_orders:
+                # fetch live market price since SDK doesn't return order price
+                price = 0
+                contracts = 20
+                try:
+                    _mr = requests.get(
+                        f"{Config.KALSHI_BASE}/markets/{o.ticker}", timeout=6)
+                    if _mr.ok:
+                        _md = _mr.json().get("market", {})
+                        if o.side == "no":
+                            price = int(float(_md.get("no_ask_dollars", 0) or 0) * 100)
+                        else:
+                            price = int(float(_md.get("yes_ask_dollars", 0) or 0) * 100)
+                except Exception:
+                    pass
+                open_positions[o.ticker] = {
+                    "side":         o.side,
+                    "entry_price":  price,
+                    "contracts":    contracts,
+                    "strategy":     "value_fade",
+                    "entry_time":   datetime.now(timezone.utc).isoformat(),
+                    "event_ticker": o.ticker.rsplit("-", 1)[0],
+                    "reason":       "recovered resting order on startup",
+                    "entry_fee":    0.0,
+                    "order_id":     o.order_id,
+                    "is_bot":       True,
+                    "peak_price":   price,
+                    "last_bid":     price,
+                }
+                _recovered += 1
+        if _recovered:
+            save_positions(open_positions)
+            log.info(f"[Startup] Recovered {_recovered} resting order(s) into positions")
+    except Exception as _e:
+        log.warning(f"[Startup] Resting order recovery failed: {_e}")
+
     # Start price watcher thread
     _watcher = PriceWatcher(
         open_positions    = open_positions,
