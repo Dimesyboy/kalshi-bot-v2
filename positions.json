@@ -11,6 +11,20 @@
     "order_id": "a4fd029d-1a87-42c3-a195-31aacb78d98e",
     "is_bot": true,
     "peak_price": 7,
+    "last_bid": 5
+  },
+  "KXNBAGAME-26MAR20NYKBKN-NYK": {
+    "side": "no",
+    "entry_price": 8,
+    "contracts": 20,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-19T10:18:55.659497+00:00",
+    "event_ticker": "KXNBAGAME-26MAR20NYKBKN",
+    "reason": "recovered resting order on startup",
+    "entry_fee": 0.0,
+    "order_id": "83a6b4aa-8f2b-4fc6-86d6-1fc6cf4a9d97",
+    "is_bot": true,
+    "peak_price": 8,
     "last_bid": 6
   }
 }
