@@ -408,7 +408,13 @@ def strategy_value_fade(item, espn_cache=None):
             if tctx:
                 if tctx.p1_sets > 1 or tctx.p2_sets > 1:
                     return None
+                # Don't fade a favorite who is already winning sets
+                # YES side = favorite. If favorite leads in sets, price is correct
+                if tctx.sets_down <= 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):
+                    return None  # favorite already won a set — not a fade
                 ctx_reason = f"Tennis live | {ctx_reason}"
+        elif live:
+            return None  # never enter live tennis without context
 
     # Hard confidence floor
     if conf < 0.60:
@@ -495,7 +501,7 @@ def strategy_tennis_underdog(item, espn_cache=None):
     tctx=get_tennis_context(m.ticker, espn_cache)
     if not tctx or not tctx.is_live:
         return None
-    if tctx.sets_down >= 2:
+    if tctx.sets_down >= 2:  # YES player down 2 sets — match nearly lost
         return None
     if abs(tctx.p1_games - tctx.p2_games) > 3:
         return None

@@ -259,7 +259,10 @@ def _build_context(match: dict, ticker: str) -> Optional[TennisContext]:
         else:
             server = serve_raw
 
-        sets_down  = abs(p1_sets - p2_sets)
+        # sets_down = sets the YES/ticker player (p1) has lost
+        # positive means p1 is behind, negative means p1 is ahead
+        # we keep it as p2_sets - p1_sets so positive = p1 losing
+        sets_down  = p2_sets - p1_sets  # positive = YES player losing (underdog situation)
         event_type = (match.get("event_type_type") or "").upper()
         max_sets   = 5 if any(x in event_type for x in ("GRAND SLAM", "GS")) else 3
         total_sets = p1_sets + p2_sets
