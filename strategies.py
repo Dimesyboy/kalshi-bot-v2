@@ -446,7 +446,8 @@ def strategy_value_fade(item, espn_cache=None):
 # =============================================================================
 # STRATEGY 2: NBA/MLB Prop YES (disabled — kept for reference)
 # =============================================================================
-def strategy_prop_yes(item, espn_cache=None):
+def strategy_prop_yes(item, espn_cache=None):  # DISABLED: fake confidence, replaced by strategy_prop_edge
+    return None
     from models import TradeSignal, Config
     m=item["market"]
     if not _is_prop(m.ticker): return None
@@ -530,7 +531,8 @@ def strategy_tennis_underdog(item, espn_cache=None):
 # =============================================================================
 # STRATEGY 4: Quarter/Half Winner
 # =============================================================================
-def strategy_quarter_winner(item, espn_cache=None):
+def strategy_quarter_winner(item, espn_cache=None):  # DISABLED: 40-60c is most efficient zone, no edge possible
+    return None
     from models import TradeSignal, Config
     m=item["market"]
     if not any(m.ticker.startswith(s) for s in [
@@ -565,7 +567,8 @@ def strategy_quarter_winner(item, espn_cache=None):
 # =============================================================================
 # STRATEGY 5: NBA Player Props (Points + 3PT)
 # =============================================================================
-def strategy_prop_nba(item, espn_cache=None):
+def strategy_prop_nba(item, espn_cache=None):  # DISABLED: 55-62c too narrow, normal dist model invalid
+    return None
     from models import TradeSignal, Config
     m = item["market"]
     if not any(m.ticker.startswith(s) for s in ["KXNBAPTS", "KXNBA3PT"]):
@@ -601,7 +604,8 @@ def strategy_prop_nba(item, espn_cache=None):
 # =============================================================================
 # STRATEGY 6: MLB Spring Training Underdog
 # =============================================================================
-def strategy_mlb_underdog(item, espn_cache=None):
+def strategy_mlb_underdog(item, espn_cache=None):  # DISABLED: spring training records near-zero predictive value
+    return None
     from models import TradeSignal, Config
     m = item["market"]
     if not m.ticker.startswith("KXMLBSTGAME"):
