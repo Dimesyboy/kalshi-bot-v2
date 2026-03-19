@@ -1052,6 +1052,16 @@ def execute_signal(
                 _no_p  = max(1, signal.price)
 
             with _tt.step("order_placement"):
+                # Cancel any existing resting order on same ticker before placing new one
+                try:
+                    _existing = portfolio_api.get_orders(limit=50)
+                    for _o in (_existing.orders or []):
+                        if _o.ticker == signal.market_ticker and _o.status in ("resting","pending"):
+                            portfolio_api.cancel_order(order_id=_o.order_id)
+                            log.info(f"[Execute] Cancelled stale resting order {_o.order_id[:8]} on {signal.market_ticker}")
+                except Exception as _ce:
+                    log.debug(f"[Execute] Stale order cancel failed: {_ce}")
+
                 order    = portfolio_api.create_order(
                     ticker          = signal.market_ticker,
                     action          = signal.action,

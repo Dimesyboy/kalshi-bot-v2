@@ -1,44 +1,28 @@
 {
   "KXWTAMATCH-26MAR19LINSWI-SWI": {
     "side": "no",
-    "entry_price": 7,
+    "entry_price": 94,
+    "peak_price": 94,
+    "last_bid": 94,
     "contracts": 20,
-    "strategy": "value_fade",
-    "entry_time": "2026-03-19T07:36:06.211480+00:00",
+    "strategy": "manual",
+    "entry_time": "2026-03-19T09:41:47.691852Z",
     "event_ticker": "KXWTAMATCH-26MAR19LINSWI",
-    "reason": "recovered resting order on startup",
-    "entry_fee": 0.0,
-    "order_id": "a4fd029d-1a87-42c3-a195-31aacb78d98e",
-    "is_bot": true,
-    "peak_price": 7,
-    "last_bid": 5
+    "reason": "From fills",
+    "entry_fee": 0.02,
+    "is_bot": false
   },
-  "KXMLBSTGAME-26MAR191305BALNYY-NYY": {
-    "side": "no",
-    "entry_price": 21,
-    "contracts": 20,
-    "strategy": "value_fade",
-    "entry_time": "2026-03-19T13:32:03.993160+00:00",
-    "event_ticker": "KXMLBSTGAME-26MAR191305BALNYY",
-    "reason": "recovered resting order on startup",
-    "entry_fee": 0.0,
-    "order_id": "01fa8997-4591-465b-a95d-c0aa2f117005",
-    "is_bot": true,
-    "peak_price": 34,
-    "last_bid": 26
-  },
-  "KXNBAGAME-26MAR19DETWAS-DET": {
-    "side": "no",
-    "entry_price": 10,
-    "contracts": 20,
-    "strategy": "value_fade",
-    "entry_time": "2026-03-19T13:32:04.139453+00:00",
-    "event_ticker": "KXNBAGAME-26MAR19DETWAS",
-    "reason": "recovered resting order on startup",
-    "entry_fee": 0.0,
-    "order_id": "8267441e-ba07-40e6-a2ec-ad4087efdf9f",
-    "is_bot": true,
-    "peak_price": 10,
-    "last_bid": 9
+  "KXWTAMATCH-26MAR18BEJGIB-BEJ": {
+    "side": "yes",
+    "entry_price": 13,
+    "peak_price": 13,
+    "last_bid": 13,
+    "contracts": 21,
+    "strategy": "manual",
+    "entry_time": "2026-03-19T14:46:47.392822Z",
+    "event_ticker": "KXWTAMATCH-26MAR18BEJGIB",
+    "reason": "From fills",
+    "entry_fee": 0.17,
+    "is_bot": false
   }
 }
