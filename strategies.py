@@ -725,6 +725,13 @@ except ImportError:
     _MOMENTUM = False
     log.warning("[Strategies] strategy_momentum_reversal not found")
 
+try:
+    from strategy_closing_line import strategy_closing_line as _closing_line
+    _CLV = True
+except ImportError:
+    _CLV = False
+    log.warning("[Strategies] strategy_closing_line not found")
+
 STRATEGIES = [
     _wrap(strategy_value_fade),
     _wrap(strategy_prop_nba),
@@ -732,4 +739,4 @@ STRATEGIES = [
     # strategy_prop_yes disabled — replaced by strategy_prop_nba (data-driven)
     # _wrap(strategy_tennis_underdog),  # DISABLED — 15% win rate, -$4.74 over 39 trades
     # strategy_quarter_winner disabled — 40-60c zone has no edge
-] + ([_wrap(_momentum_reversal)] if _MOMENTUM else [])
+] + ([_wrap(_momentum_reversal)] if _MOMENTUM else [])   + ([_wrap(_closing_line)] if _CLV else [])

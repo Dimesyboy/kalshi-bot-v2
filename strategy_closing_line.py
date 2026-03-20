@@ -85,7 +85,7 @@ def strategy_closing_line(item: dict, espn_cache=None) -> Optional[object]:
     """
     Fade the public side when sharp money has moved the line.
     """
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     from strategies import _ev
 
     m     = item["market"]
@@ -144,11 +144,26 @@ def strategy_closing_line(item: dict, espn_cache=None) -> Optional[object]:
     if price_cents < 35 or price_cents > 65:
         return None
 
-    conf = 0.55   # sharp money right ~55% historically
+    # Confidence scales with movement size and volume
+    # Larger movement = stronger signal
+    move_abs = abs(movement)
+    if move_abs >= 10:
+        conf = 0.63
+    elif move_abs >= 7:
+        conf = 0.61
+    else:
+        conf = 0.58
+    # Volume boost — more action = more reliable signal
+    if m.volume >= 30000:
+        conf += 0.02
+    elif m.volume >= 20000:
+        conf += 0.01
+    conf = round(min(conf, 0.72), 3)
 
+    # Hard cap at 3 contracts until win rate is validated from trade history
     contracts = max(1, min(
         int(Config.MAX_POSITION_USD / max(entry_price, 0.01)),
-        20
+        3
     ))
     # EV differs by side
     if side == "no":
@@ -160,7 +175,7 @@ def strategy_closing_line(item: dict, espn_cache=None) -> Optional[object]:
         fee      = 0.0175 * contracts * (stake_c/100) * (payout_c/100) * 100
         ev       = round(conf*(payout_c/100)*contracts
                          - (1-conf)*(stake_c/100)*contracts - fee*2, 4)
-    if ev < 0.05:
+    if ev < 2.0:
         return None
 
     reason = (
