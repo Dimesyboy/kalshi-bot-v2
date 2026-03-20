@@ -270,6 +270,16 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
     rm=[]
     for ticker,pos in list(open_positions.items()):
         if ticker in kt: continue
+        # Age gate — never remove a position younger than 5 minutes
+        # Fills API can lag 30-60s, reconciler must not race against it
+        try:
+            et = pos.get("entry_time","")
+            if et:
+                age = (datetime.now(timezone.utc) - datetime.fromisoformat(et)).total_seconds()
+                if age < 300:
+                    log.info(f"[Reconcile] {ticker} only {int(age)}s old — keeping, fills may not have propagated")
+                    continue
+        except: pass
         # Check if there is a resting (unfilled) bot order for this ticker
         # If so, keep the position — the order just hasn't filled yet
         order_id = pos.get("order_id","")

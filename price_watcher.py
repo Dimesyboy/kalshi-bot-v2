@@ -375,37 +375,28 @@ class PriceWatcher:
             exit_fee = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
             pnl = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
 
-            # ── Unified exit logic — all sports, both sides ──────────────
-            # Trail activation is side and price aware
-            import math as _math
-            _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
-            _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
-            _fees = _ef + _xf
-            _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
-            trail_active = bid >= entry + _cents
-            trail_stop   = int(peak * 0.80)
-            hard_stop    = int(entry * 0.60)
+            # ── Fixed-cent exit logic — matches strategy_exit exactly ──
+            TAKE_PROFIT_CENTS = 12
+            STOP_LOSS_CENTS   = 6
 
-            if trail_active and bid <= trail_stop:
+            move = bid - entry  # positive = winning
+
+            if move >= TAKE_PROFIT_CENTS:
                 self._place_exit(ticker, pos, bid,
-                    f"Trail stop: {bid}c <= {trail_stop}c peak={peak}c PNL=${pnl:.2f}")
+                    f"TP: +{move}c >= +{TAKE_PROFIT_CENTS}c | PNL=${pnl:.2f}")
                 continue
 
-            if bid <= hard_stop:
+            if move <= -STOP_LOSS_CENTS:
                 self._place_exit(ticker, pos, bid,
-                    f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}")
+                    f"SL: {move}c <= -{STOP_LOSS_CENTS}c | PNL=${pnl:.2f}")
                 continue
 
+            # Rocket exit — large single-cycle jump with profit
             last_bid = pos.get("last_bid", entry)
             jump = bid - last_bid
             if jump >= 25 and pnl >= 0.50:
                 self._place_exit(ticker, pos, bid,
-                    f"Rocket exit: +{jump}c this cycle, profit=${pnl:.2f}")
-                continue
-
-            if entry <= 15 and bid >= 30 and pnl >= 0.50:
-                self._place_exit(ticker, pos, bid,
-                    f"Longshot hit: {entry}c -> {bid}c profit=${pnl:.2f}")
+                    f"Rocket: +{jump}c this cycle | PNL=${pnl:.2f}")
                 continue
 
             pos["last_bid"] = bid
