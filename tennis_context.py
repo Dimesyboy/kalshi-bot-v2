@@ -209,17 +209,16 @@ def _parse_ticker_players(ticker: str) -> Tuple[str, str]:
 def _name_matches_fragment(fragment: str, full_name: str) -> bool:
     if not fragment or not full_name:
         return False
-    # Require minimum fragment length to avoid false positives
     if len(fragment) < 3:
         return False
     frag = fragment.upper()
     name = full_name.upper()
-    # Direct substring match
-    if frag in name:
-        return True
-    # Word-level match - fragment must match start of a word with 4+ chars
+    # Word-level match only — fragment must match START of a word
+    # Never use substring match — 3-letter codes match inside longer names
     for word in re.split(r'[\s.\-]', name):
-        if len(word) >= 4 and word.startswith(frag[:4]):
+        if not word:
+            continue
+        if word.startswith(frag):
             return True
     return False
 
