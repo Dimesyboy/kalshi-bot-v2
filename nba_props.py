@@ -84,36 +84,85 @@ class NBAProContext:
 
 
 def _fetch_all_players() -> Dict:
-    """Fetch all player season totals, cache for 4 hours."""
+    """Fetch all player season totals, cache for 4 hours.
+    Primary: pbpstats. Fallback: basketball-reference."""
     global _all_players, _all_players_ts
     now = time.time()
     if _all_players and now - _all_players_ts < PLAYER_TTL:
         return _all_players
 
+    # ── Primary: pbpstats ────────────────────────────────────────
     try:
-        # Fetch top 500 by points — covers all meaningful prop players
         r = requests.get(BASE_URL, params={
             "Season":     "2024-25",
             "SeasonType": "Regular Season",
             "Type":       "Player",
             "sortBy":     "points",
             "pageSize":   500,
-        }, timeout=TIMEOUT)
+        }, timeout=8)
         r.raise_for_status()
         data = r.json().get("multi_row_table_data", [])
+        if data:
+            out = {}
+            for p in data:
+                name = p.get("Name", "")
+                if name:
+                    out[name.upper()] = p
+            _all_players    = out
+            _all_players_ts = now
+            log.info(f"[NBA Props] pbpstats: {len(out)} players loaded")
+            return out
+    except Exception as e:
+        log.warning(f"[NBA Props] pbpstats failed: {e} — trying fallback")
+
+    # ── Fallback: basketball-reference ───────────────────────────
+    try:
+        from io import StringIO
+        import pandas as pd
+        r = requests.get(
+            "https://www.basketball-reference.com/leagues/NBA_2025_per_game.html",
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        tables = pd.read_html(StringIO(r.text))
+        df = tables[0]
+        df = df[df["Player"] != "Player"].copy()  # remove repeated headers
+        df = df.dropna(subset=["Player"])
 
         out = {}
-        for p in data:
-            name = p.get("Name", "")
-            if name:
-                out[name.upper()] = p
+        for _, row in df.iterrows():
+            name = str(row.get("Player", "")).strip()
+            if not name:
+                continue
+            # Normalise to same field names the rest of nba_props.py expects
+            out[name.upper()] = {
+                "Name":        name,
+                "playerName":  name,
+                "team":        str(row.get("Team", "")),
+                "games":       _safe_float(row.get("G", 0)),
+                "minutesPg":   _safe_float(row.get("MP", 0)) * _safe_float(row.get("G", 1)),
+                "points":      _safe_float(row.get("PTS", 0)) * _safe_float(row.get("G", 1)),
+                "threeFg":     _safe_float(row.get("3P", 0))  * _safe_float(row.get("G", 1)),
+                "rebounds":    _safe_float(row.get("TRB", 0)) * _safe_float(row.get("G", 1)),
+                "assists":     _safe_float(row.get("AST", 0)) * _safe_float(row.get("G", 1)),
+                "fieldAttempts": _safe_float(row.get("FGA", 0)) * _safe_float(row.get("G", 1)),
+                "ftAttempts":  _safe_float(row.get("FTA", 0))  * _safe_float(row.get("G", 1)),
+            }
         _all_players    = out
         _all_players_ts = now
-        log.info(f"[NBA Props] Player stats loaded: {len(out)} players")
+        log.info(f"[NBA Props] bball-ref fallback: {len(out)} players loaded")
         return out
     except Exception as e:
-        log.warning(f"[NBA Props] Failed to fetch players: {e}")
-        return _all_players  # return stale on failure
+        log.warning(f"[NBA Props] bball-ref fallback failed: {e}")
+        return _all_players  # return stale on total failure
+
+
+def _safe_float(val) -> float:
+    try:
+        return float(val)
+    except:
+        return 0.0
 
 
 def _fetch_pace() -> Dict:
