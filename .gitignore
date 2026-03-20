@@ -1,21 +1,18 @@
-# Secrets
-.env
-*.pem
-*.key
-
-# Logs & data
 *.log
+*.csv
+*.bak
+positions.json
 pnl_log.json
-espn_cache.json
-
-# Python
+bot_orders.json
+cooldown.json
+.bash_history
+.wget-hsts
 __pycache__/
 *.pyc
-*.pyo
-
-# Backups
-*.bak
-*.old
-
-# Caches
-cache/
+.env
+*_before_*.py
+paper_trades*.csv
+kalshi_private_key.pem
+*.pem
+kalshi-bot/
+Kalshi-bot/

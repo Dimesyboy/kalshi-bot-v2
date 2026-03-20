@@ -644,74 +644,68 @@ def strategy_mlb_underdog(item, espn_cache=None):  # DISABLED: spring training r
 def strategy_exit(item, pos, espn_cache=None):
     from models import TradeSignal, Config
     from datetime import datetime, timezone
-    m=item["market"]; side=pos["side"]; entry=pos["entry_price"]
-    contracts=pos["contracts"]; strategy=pos["strategy"]
-    if entry==0: return None
+
+    m        = item["market"]
+    side     = pos["side"]
+    entry    = pos["entry_price"]
+    contracts = pos["contracts"]
+    strategy = pos["strategy"]
+
+    if entry == 0: return None
     if pos.get("is_bot") is False: return None  # never auto-exit manual positions
 
-    # unified exit — works for both YES and NO
+    # Current bid — side-aware
     if side == "yes":
         bid = max(1, int(m.yes_bid * 100))
     else:
         bid = max(1, int(m.no_bid * 100))
 
-    peak = max(bid, pos.get("peak_price", entry))
-    pos["peak_price"] = peak
+    # P&L in cents from our perspective (positive = winning)
+    move = bid - entry  # YES: up is good. NO: no_bid rising is good.
 
-    fee_mult   = 0.0175
-    entry_fee  = pos.get("entry_fee", 0.0)
-    exit_fee   = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
-    pnl        = (bid - entry) * contracts / 100.0 - entry_fee - exit_fee
+    # Fee estimate for logging
+    fee_mult  = 0.0175
+    entry_fee = pos.get("entry_fee", 0.0)
+    exit_fee  = math.ceil(fee_mult * contracts * (bid/100) * (1 - bid/100) * 100) / 100
+    pnl       = move * contracts / 100.0 - entry_fee - exit_fee
 
-    # Trail activates once position shows at least $0.10 net profit
-    import math as _math
-    _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
-    _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
-    _fees = _ef + _xf
-    _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
-    trail_active = bid >= entry + _cents
-    trail_stop   = int(peak * 0.80)
-
-    # Hard stop — 40% loss from entry regardless of trail
-    hard_stop = int(entry * 0.60)
+    # ── Fixed-cent exits ──────────────────────────────────────────
+    TAKE_PROFIT_CENTS = 12
+    STOP_LOSS_CENTS   = 6
 
     reason = None
+    strat  = None
 
-    if trail_active and bid <= trail_stop:
-        reason = f"Trail stop: {bid}c <= {trail_stop}c (peak={peak}c entry={entry}c) PNL=${pnl:.2f}"
-    elif bid <= hard_stop:
-        reason = f"Hard stop: {bid}c <= {hard_stop}c (40% loss) PNL=${pnl:.2f}"
+    if move >= TAKE_PROFIT_CENTS:
+        reason = f"TP: +{move}c >= +{TAKE_PROFIT_CENTS}c | PNL=${pnl:.4f}"
+        strat  = f"exit_tp_{strategy}"
 
-    # stale exit — position hasn't moved and is underwater after fees
-    stale = False
-    try:
-        et = pos.get("entry_time","")
-        if et:
-            age = (datetime.now(timezone.utc)-datetime.fromisoformat(et)).total_seconds()
-            strategy_name = pos.get("strategy","")
-            if "tennis" in strategy_name.lower():
-                stale_min_age = 7200
-            elif "mlb" in strategy_name.lower():
-                stale_min_age = 10800
-            else:
-                stale_min_age = 1800
-            if age > stale_min_age and abs(bid-entry) < 4 and pnl < -0.20:
-                stale=True
-    except: pass
-    # stale exit — YES positions only, NO positions settle naturally
-    if stale and reason is None and side == "yes":
-        reason = f"Stale: {int(age)}s, {abs(bid-entry)}c move, PNL=${pnl:.2f}"
+    elif move <= -STOP_LOSS_CENTS:
+        reason = f"SL: {move}c <= -{STOP_LOSS_CENTS}c | PNL=${pnl:.4f}"
+        strat  = f"exit_sl_{strategy}"
+
+    else:
+        # ── Time stop ─────────────────────────────────────────────
+        try:
+            et = pos.get("entry_time", "")
+            if et:
+                age = (datetime.now(timezone.utc) -
+                       datetime.fromisoformat(et)).total_seconds()
+                strategy_name = pos.get("strategy", "")
+                if "tennis" in strategy_name.lower():
+                    max_age = 7200
+                elif "mlb" in strategy_name.lower():
+                    max_age = 10800
+                else:
+                    max_age = 5400  # 90 min NBA/other
+                if age > max_age:
+                    reason = f"TIME: {int(age/60)}min > {max_age//60}min | PNL=${pnl:.4f}"
+                    strat  = f"exit_time_{strategy}"
+        except:
+            pass
 
     if reason is None:
         return None
-
-    # determine strategy tag
-    if stale and not trail_active and bid > hard_stop:
-        strat = f"exit_stale_{strategy}"
-    elif trail_active and bid <= trail_stop:
-        strat = f"exit_trail_{strategy}"
-    else:
-        strat = f"exit_sl_{strategy}"
 
     return TradeSignal(
         event_ticker=item["event_ticker"], market_ticker=m.ticker,
