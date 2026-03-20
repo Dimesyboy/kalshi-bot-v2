@@ -718,11 +718,18 @@ def _wrap(fn):
     def w(item, espn_cache=None): return fn(item, espn_cache=espn_cache)
     return w
 
+try:
+    from strategy_momentum_reversal import strategy_momentum_reversal as _momentum_reversal
+    _MOMENTUM = True
+except ImportError:
+    _MOMENTUM = False
+    log.warning("[Strategies] strategy_momentum_reversal not found")
+
 STRATEGIES = [
     _wrap(strategy_value_fade),
     _wrap(strategy_prop_nba),
     _wrap(strategy_mlb_underdog),
     # strategy_prop_yes disabled — replaced by strategy_prop_nba (data-driven)
     # _wrap(strategy_tennis_underdog),  # DISABLED — 15% win rate, -$4.74 over 39 trades
-    _wrap(strategy_quarter_winner),
-]
+    # strategy_quarter_winner disabled — 40-60c zone has no edge
+] + ([_wrap(_momentum_reversal)] if _MOMENTUM else [])

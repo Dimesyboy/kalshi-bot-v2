@@ -44,7 +44,7 @@ def strategy_momentum_reversal(item: dict, espn_cache=None) -> Optional[object]:
     Buy NO when a scoring run has inflated the favorite's price.
     Requires ESPN live context to confirm the run and game state.
     """
-    from kalshi_bot import TradeSignal, Config
+    from models import TradeSignal, Config
     from nba_context import find_game_for_ticker
 
     m     = item["market"]
@@ -117,7 +117,7 @@ def strategy_momentum_reversal(item: dict, espn_cache=None) -> Optional[object]:
         20
     ))
     ev = _ev(contracts, no_bid_cents, conf, is_maker=True)
-    if ev < 0.05:
+    if ev < 2.0:
         return None
 
     leading_team = "home" if ctx.lead > 0 else "away"
