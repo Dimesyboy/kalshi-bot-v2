@@ -409,18 +409,35 @@ def strategy_value_fade(item, espn_cache=None):
             ctx_reason = f"Live Q{ctx.nba_quarter} lead={ctx.lead} | {ctx_reason}"
 
     elif _is_tennis(m.ticker):
-        if live and _TENNIS_CTX and espn_cache:
+        # Always try to get tennis context — pre-game and live
+        tctx = None
+        if _TENNIS_CTX:
             tctx = get_tennis_context(m.ticker, espn_cache)
-            if tctx:
-                if tctx.p1_sets > 1 or tctx.p2_sets > 1:
-                    return None
-                # Don't fade a favorite who is already winning sets
-                # YES side = favorite. If favorite leads in sets, price is correct
-                if tctx.sets_down <= 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):
-                    return None  # favorite already won a set — not a fade
-                ctx_reason = f"Tennis live | {ctx_reason}"
-        elif live:
-            return None  # never enter live tennis without context
+
+        # Require context to trade tennis — blind fades have no edge
+        if not tctx:
+            return None
+
+        if live:
+            # Live gates
+            if tctx.p1_sets > 1 or tctx.p2_sets > 1:
+                return None
+            if tctx.sets_down <= 0 and (tctx.p1_sets > 0 or tctx.p2_sets > 0):
+                return None  # favorite already won a set
+        else:
+            # Pre-game: require meaningful ranking data
+            if tctx.p1_rank == 999 and tctx.p2_rank == 999:
+                return None  # no ranking data — can't assess edge
+
+            # Don't fade a top-10 player pre-game without live context
+            # Top-10 prices are usually correctly set
+            better_rank = min(tctx.p1_rank, tctx.p2_rank)
+            if better_rank <= 10:
+                return None
+
+        # Use tennis context confidence directly
+        conf = tctx.underdog_conf
+        ctx_reason = f"Tennis {'live' if live else 'pre-game'} | {tctx.summary()}"
 
     # Hard confidence floor
     if conf < 0.60:
