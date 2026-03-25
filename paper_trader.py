@@ -53,14 +53,31 @@ def load_pending():
         return pending
     with open(PAPER_FILE) as f:
         for row in csv.DictReader(f):
-            if row.get("resolved","") != "yes":
+            if row.get("resolved","") in ("", "no"):
                 pending.append(row)
     return pending
 
-def update_row(ticker, resolved_price, entry_price, side, contracts, signal_time):
-    ep    = float(entry_price)
-    xp    = resolved_price
-    ct    = int(contracts)
+TP_CENTS = 12
+SL_CENTS = 6
+
+def update_row(ticker, current_price, entry_price, side, contracts, signal_time):
+    ep  = float(entry_price)
+    cp  = current_price
+    ct  = int(contracts)
+    move = cp - ep
+
+    # Simulate TP/SL — use fixed exit price not snapshot price
+    if move >= TP_CENTS:
+        exit_price = ep + TP_CENTS
+        exit_reason = f"TP +{TP_CENTS}c"
+    elif move <= -SL_CENTS:
+        exit_price = ep - SL_CENTS
+        exit_reason = f"SL -{SL_CENTS}c"
+    else:
+        exit_price = cp  # time stop — use current price
+        exit_reason = "TIME"
+
+    xp    = exit_price
     fee_e = calculate_fee(ct, ep/100, is_maker=True)
     fee_x = calculate_fee(ct, xp/100, is_maker=True)
     pnl   = (xp - ep) * ct / 100.0 - fee_e - fee_x
@@ -68,7 +85,7 @@ def update_row(ticker, resolved_price, entry_price, side, contracts, signal_time
         "resolve_time":  datetime.now(timezone.utc).isoformat(),
         "resolve_price": xp,
         "hyp_pnl":       round(pnl, 4),
-        "resolved":      "yes",
+        "resolved":      exit_reason,
     }
 
 def rewrite_csv(all_rows):
@@ -95,7 +112,7 @@ def log_signal(sig):
             "resolve_time":  "",
             "resolve_price": "",
             "hyp_pnl":       "",
-            "resolved":      "no",
+            "resolved":      "",
         })
     log.info(f"[Paper] SIGNAL logged: {sig.market_ticker} {sig.side} @ {sig.price}c "
              f"strat={sig.strategy} conf={sig.confidence:.2f}")
@@ -107,7 +124,7 @@ def print_paper_stats():
     from collections import defaultdict
     import math
     rows = list(csv.DictReader(open(PAPER_FILE)))
-    resolved = [r for r in rows if r.get("resolved") == "yes"]
+    resolved = [r for r in rows if r.get("resolved","") not in ("", "no")]
     if not resolved:
         print(f"No resolved paper trades yet. {len(rows)} pending.")
         return
@@ -157,7 +174,7 @@ while True:
         all_rows = list(csv.DictReader(open(PAPER_FILE)))
         updated  = False
         for row in all_rows:
-            if row.get("resolved") == "yes":
+            if row.get("resolved","") not in ("", "no"):
                 continue
             try:
                 st = datetime.fromisoformat(row["signal_time"])
