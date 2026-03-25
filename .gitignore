@@ -17,3 +17,8 @@ kalshi_private_key.pem
 kalshi-bot/
 Kalshi-bot/
 kalshi-bot/
+.bash_history
+.wget-hsts
+cooldown.json
+kalshi_bot.log.*
+requirements.txt
