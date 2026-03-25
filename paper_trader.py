@@ -24,6 +24,7 @@ FIELDS       = ["signal_time","market_ticker","strategy","side",
                 "resolve_time","resolve_price","hyp_pnl","resolved"]
 RESOLVE_SECS = 45 * 60   # check outcome after 45 min
 LOOP_SECS    = 45
+START_OFFSET = 22  # seconds offset from main bot cycle
 
 # ── Lazy imports from bot ────────────────────────────────────────────
 sys.path.insert(0, '/root')
@@ -38,6 +39,9 @@ def get_current_price(ticker, side):
         r = requests.get(f"{KALSHI_BASE}/markets/{ticker}", timeout=6)
         r.raise_for_status()
         m = r.json().get("market", {})
+        # Skip settled markets — prices go to 1c/99c and pollute stats
+        if m.get("status") in ("settled", "finalized"):
+            return None
         key = "no_bid_dollars" if side == "no" else "yes_bid_dollars"
         return max(1, int(float(m.get(key, 0) or 0) * 100))
     except:
@@ -136,6 +140,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--stats":
     print_paper_stats()
     sys.exit(0)
 
+time.sleep(START_OFFSET)  # stagger vs main bot to avoid 429s
 log.info("Paper trader starting. Signals logged to paper_trades.csv")
 log.info("Run with --stats to see results at any time.")
 
