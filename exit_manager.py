@@ -60,6 +60,18 @@ def should_exit(pos: dict, current_bid: int) -> Tuple[bool, str]:
     if move >= TAKE_PROFIT_CENTS:
         return True, f"TP: +{move}c >= +{TAKE_PROFIT_CENTS}c | PNL=${pnl:.4f}"
 
+    # ── Trailing stop — never give back profit ─────────────────────────
+    peak_price = int(pos.get("peak_price", entry))
+    peak_move  = peak_price - entry
+    if peak_move >= 8:
+        trail_stop = peak_price - 3
+        if current_bid <= trail_stop:
+            return True, f"TRAIL: {current_bid}c <= {trail_stop}c (peak={peak_price}c) | PNL=${pnl:.4f}"
+    elif peak_move >= 5:
+        trail_stop = peak_price - 4
+        if current_bid <= trail_stop:
+            return True, f"TRAIL: {current_bid}c <= {trail_stop}c (peak={peak_price}c) | PNL=${pnl:.4f}"
+
     # ── Stop loss ──────────────────────────────────────────────────
     if move <= -STOP_LOSS_CENTS:
         return True, f"SL: {move}c <= -{STOP_LOSS_CENTS}c | PNL=${pnl:.4f}"
