@@ -318,16 +318,6 @@ def _ev(contracts, price_cents, confidence, is_maker=True):
     return round(net_ev, 4)
 
 def _ratio_ok(price_cents, min_ratio=1.5):
-    """Payout must be at least min_ratio x stake.
-    40c: payout=60c/stake=40c = 1.5 OK
-    65c: payout=35c/stake=65c = 0.54 FAIL
-    """
-    pd = price_cents / 100.0
-    if pd <= 0: return False
-    return (1.0 - pd) / pd >= min_ratio
-
-
-def _ratio_ok(price_cents, min_ratio=1.5):
     """Payout must be at least min_ratio times the stake.
     e.g. at 40c: payout=60c, stake=40c, ratio=1.5 — just passes
     at 65c: payout=35c, stake=65c, ratio=0.54 — fails

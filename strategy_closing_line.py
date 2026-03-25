@@ -160,10 +160,10 @@ def strategy_closing_line(item: dict, espn_cache=None) -> Optional[object]:
         conf += 0.01
     conf = round(min(conf, 0.72), 3)
 
-    # Hard cap at 3 contracts until win rate is validated from trade history
+    # Cap at 10 contracts — enough to clear EV gate, dollar-capped by MAX_POSITION_USD
     contracts = max(1, min(
         int(Config.MAX_POSITION_USD / max(entry_price, 0.01)),
-        3
+        10
     ))
     # EV differs by side
     if side == "no":

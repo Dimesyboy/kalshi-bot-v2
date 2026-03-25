@@ -1,35 +1,3 @@
-em = ExitManager()
-pos = {"entry_price": 82, "side": "yes", "contracts": 5, "entry_time": time.time()-5400}
-print("TP test:", em.should_exit(pos, 95))
-pos2 = {"entry_price": 85, "side": "yes", "contracts": 5, "entry_time": time.time()}
-print("No-exit test:", em.should_exit(pos2, 87))
-'
-cd /root/kalshi-bot
-cp price_watcher.py price_watcher.py.bak
-cat > /tmp/wire_exit.py << 'EOF'
-import re
-
-with open('price_watcher.py', 'r') as f:
-    code = f.read()
-
-# 1. Add import if missing
-if 'from exit_manager import ExitManager' not in code:
-    code = re.sub(r'(import requests)', r'\1\nfrom exit_manager import ExitManager', code, count=1)
-
-# 2. Add ExitManager instance in __init__
-if 'self.exit_manager' not in code:
-    code = re.sub(
-        r'(self\._bot_orders = bot_orders)',
-        r'\1\n        self.exit_manager = ExitManager()',
-        code
-    )
-
-# 3. Replace the old unified percentage exit block with fixed-cent ExitManager call
-old_block = r"""        # ── Unified exit logic — all sports, both sides ──────────────
-        # Trail activation is side and price aware
-        import math as _math
-        _ef = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
-        _xf = _math.ceil(0.0175*contracts*(entry/100)*(1-entry/100)*100)/100
         _fees = _ef + _xf
         _cents = int(_math.ceil((0.10 + _fees)/contracts*100)) + 1
         trail_active = bid >= entry + _cents
@@ -1998,3 +1966,35 @@ screen -r
 source kalshi-bot/bin/activate
 screen -r
 python kalshi_bot.py
+source kalshi-bot/bin/activate
+python kalshi_bot.py
+screen -S kalshi
+grep -E "(BUY YES|PLACED|LIVE ORDER|entry_price.*contracts)" /root/kalshi-bot/kalshi_bot.log | grep -v "BUY NO" | tail -50
+cat /root/kalshi-bot/trade_log.csv | tail -20
+cat /root/trade_log.csv
+grep "KXNBAGAME" /root/trade_log.csv | grep "yes"
+sed -n '1000,1790p' /root/kalshi_bot.py
+grep -i "yes" /root/positions.json 2>/dev/null; grep -i "KXNBAGAME" /root/positions.json 2>/dev/null
+grep "KXNBAGAME" /root/bot_orders.json 2>/dev/null | head -5
+cd /root && python3 -c "
+from strategies import _fetch_fills_raw
+from kalshi_bot import _get_kalshi_client
+client = _get_kalshi_client()
+fills = _fetch_fills_raw(client)
+nba_yes = [f for f in fills if 'KXNBAGAME' in (f.get('ticker','') or f.get('market_ticker','')) and f.get('side','') == 'yes' and f.get('action','') == 'buy']
+for f in nba_yes:
+    print(f.get('created_time','')[:19], f.get('ticker',''), f.get('side',''), f.get('action',''), f.get('count_fp',''), f.get('yes_price_dollars',''), f.get('order_id','')[:8])
+"
+if m.yes_bid >= 0.85:;     flag = "SIGNAL";     reason = f"Heavy favorite at {m.mid}c mid - fade candidate"; 
+grep -n "yes_bid < 0.95\|yes_bid < 0.96\|yes_bid < 0.93" /root/kalshi_bot.py /root/strategies.py 2>/dev/null
+grep -n "yes_bid" /root/strategies.py | head -30
+cat /root/strategies.py | head -500
+ls /root/*.py | sort && echo "---" && wc -l /root/*.py | sort -rn | head -25
+screen -ls
+pkill -f kalshi_bot.py
+screen -ls | grep Detached | awk '{print $1}' | xargs -I {} screen -S {} -X quit 
+cd /root && git add -A && git commit -m "sync live server state" && git push origin master
+cat /root/.gitignore 2>/dev/null; echo "---"; git status --short | head -30
+git ls-files | grep "\.py$" | sort
+echo "kalshi-bot/" >> /root/.gitignore && git rm -r --cached kalshi-bot/ && git add .gitignore && git commit -m "remove venv from tracking" && git push origin master
+cd /root && git log --oneline && echo "---" && git show HEAD --name-only | head -30
