@@ -288,9 +288,9 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
                 import kalshi_python
                 pa = kalshi_python.PortfolioApi(api_client=client)
                 resp = pa.get_orders(limit=50)
-                resting = {o.order_id for o in (resp.orders or []) if o.status in ("resting","pending")}
+                resting = {o.order_id for o in (resp.orders or []) if o.status in ("resting","pending","executed")}
                 if order_id in resting:
-                    log.info(f"[Reconcile] {ticker} order {order_id} still resting — keeping position")
+                    log.info(f"[Reconcile] {ticker} order {order_id} order active (resting/executed) — keeping position")
                     continue
             except Exception as e:
                 log.debug(f"[Reconcile] order check {ticker}: {e}")
