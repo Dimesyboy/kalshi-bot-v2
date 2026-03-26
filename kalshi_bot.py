@@ -66,6 +66,7 @@ load_dotenv()
 from models import Config, Market, GameEvent, TradeSignal
 from telegram_controller import TelegramController
 from trade_tracker import log_trade
+from order_manager import OrderManager
 from price_watcher import PriceWatcher
 from strategies import (
     strategy_value_fade,
@@ -900,6 +901,7 @@ def execute_signal(
     pnl_log:        dict,
     current_date:   str,
     client,
+    order_manager=None,
 ) -> tuple:
     """
     Gate -> LLM check -> confidence check -> place order or sim.
@@ -1084,25 +1086,36 @@ def execute_signal(
             if signal.action == "buy":
                 entry_fee = calculate_fee(signal.contracts, price_dollars, is_maker)
                 with _tt.step("position_record"):
-                    open_positions[signal.market_ticker] = {
-                        "side":         signal.side,
-                        "entry_price":  signal.price,
-                        "contracts":    signal.contracts,
-                        "strategy":     signal.strategy,
-                        "entry_time":   datetime.now(timezone.utc).isoformat(),
-                        "event_ticker": signal.event_ticker,
-                        "reason":       signal.reason,
-                        "entry_fee":    entry_fee,
-                        "order_id":     order_id,
-                        "is_bot":       True,
-                    }
-                    save_positions(open_positions)
-                    # FIX: persist bot order ID so reconciler survives restarts
+                    # Track bot order ID for crash recovery
                     _bot_orders.add(order_id)
                     save_bot_orders(_bot_orders)
+                    # Hand off to order_manager — positions.json written only on confirmed fill
+                    if order_manager is not None:
+                        order_manager.add_pending(
+                            signal      = signal,
+                            order_id    = order_id,
+                            contracts   = signal.contracts,
+                            entry_price = signal.price,
+                            entry_fee   = entry_fee,
+                        )
+                    else:
+                        # Fallback: direct write if order_manager not available
+                        open_positions[signal.market_ticker] = {
+                            "side":         signal.side,
+                            "entry_price":  signal.price,
+                            "contracts":    signal.contracts,
+                            "strategy":     signal.strategy,
+                            "entry_time":   datetime.now(timezone.utc).isoformat(),
+                            "event_ticker": signal.event_ticker,
+                            "reason":       signal.reason,
+                            "entry_fee":    entry_fee,
+                            "order_id":     order_id,
+                            "is_bot":       True,
+                        }
+                        save_positions(open_positions)
                 _tt.summary()
                 get_stats().record_from_timer(_tt)
-                log.info(f"[LIVE] Position recorded: {signal.market_ticker} "
+                log.info(f"[LIVE] Order pending fill: {signal.market_ticker} "
                          f"{signal.side.upper()} @ {signal.price}c x{signal.contracts}")
 
             elif signal.action == "sell":
@@ -1605,6 +1618,18 @@ def run_bot():
         log.warning(f"[Startup] Resting order recovery failed: {_e}")
 
     # Start price watcher thread
+    # Instantiate OrderManager first — watcher needs it
+    _order_manager = OrderManager(
+        positions        = open_positions,
+        save_positions_fn= save_positions,
+        pnl_log          = pnl_log,
+        save_pnl_fn      = save_pnl_log,
+        get_date_fn      = lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        bot_orders       = _bot_orders,
+        kalshi_base      = Config.KALSHI_BASE,
+    )
+    _order_manager.recover_on_startup(client)
+
     _watcher = PriceWatcher(
         open_positions    = open_positions,
         client            = client,
@@ -1614,6 +1639,7 @@ def run_bot():
         pnl_log           = pnl_log,
         get_date_fn       = lambda: datetime.now(timezone.utc).strftime("%Y-%m-%d"),
         bot_orders        = _bot_orders,
+        order_manager     = _order_manager,
     )
     _watcher.start()
 
@@ -1739,6 +1765,7 @@ def run_bot():
                 placed, total_pnl = execute_signal(
                     signal, snapshot, open_positions,
                     total_pnl, pnl_log, current_date, client,
+                    order_manager=_order_manager,
                 )
                 if placed:
                     trades_placed += 1

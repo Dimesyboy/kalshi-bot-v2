@@ -44,7 +44,7 @@ class PriceWatcher:
 
     def __init__(self, open_positions, client, config,
                  save_positions_fn, save_pnl_fn, pnl_log,
-                 get_date_fn, bot_orders):
+                 get_date_fn, bot_orders, order_manager=None):
         self._positions = open_positions
         self._client = client
         self._config = config
@@ -53,6 +53,7 @@ class PriceWatcher:
         self._pnl_log = pnl_log
         self._get_date = get_date_fn
         self._bot_orders = bot_orders
+        self._order_manager = order_manager
         self._stop_event = threading.Event()
         self._lock = threading.Lock()
         self._thread = threading.Thread(
@@ -72,6 +73,9 @@ class PriceWatcher:
     def _run(self):
         while not self._stop_event.is_set():
             try:
+                # Poll pending orders first — promotes fills to positions.json
+                if self._order_manager is not None:
+                    self._order_manager.poll_pending(self._client)
                 self._check_positions()
             except Exception as e:
                 log.warning(f"[Watcher] Cycle error: {e}")
