@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Venv
+kalshi-bot/
+venv/
+env/
+
+# Runtime data
+data/*.json
+data/*.csv
+*.log
+*.log.*
+
+# Secrets
+.env
+*.pem
+*.key
+
+# Temp
+*.tmp
+.DS_Store
