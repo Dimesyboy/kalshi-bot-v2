@@ -309,39 +309,60 @@ def submit_rfq(candidate: ComboCandidate,
         r.raise_for_status()
         return r.json()
 
-    # ── Step 1: Submit RFQ ─────────────────────────────────────────────
+    import re as _re
+    user_id = config.KALSHI_USER_ID
+    BASE    = "https://api.elections.kalshi.com"
+
+    def _event_ticker(t):
+        m = _re.match(r'(KXNBA[A-Z0-9]+-\d{2}[A-Z]{3}\d{2}[A-Z]+)', t)
+        return m.group(1) if m else t.rsplit('-', 2)[0]
+
+    # ── Step 1: Create dynamic market ticker ───────────────────────────
     try:
-        rfq_body = {
-            "market_ticker":       candidate.collection_ticker,
-            "target_cost_dollars": str(stake_dollars),
-            "contracts_fp":        "1.00",
-            "rest_remainder":      False,
-            "replace_existing":    False,
-        }
-        rfq = _signed_post('/trade-api/v2/communications/rfqs', rfq_body)
-        rfq_id = rfq.get('id') or rfq.get('rfq_id')
-        log.info(f"[Combo] RFQ submitted: {rfq_id}")
+        selected_markets = [
+            {"market_ticker": leg.ticker, "event_ticker": _event_ticker(leg.ticker), "side": "yes"}
+            for leg in candidate.legs
+        ]
+        cp = f'/trade-api/v2/multivariate_event_collections/KXMVESPORTSMULTIGAMEEXTENDED-R'
+        rc = requests.post(f"{BASE}{cp}", headers=_pss_headers("POST", cp),
+                          json={"selected_markets": selected_markets, "with_market_payload": True}, timeout=8)
+        rc.raise_for_status()
+        market_ticker = rc.json().get("market_ticker")
+        log.info(f"[Combo] Dynamic ticker: {market_ticker}")
     except Exception as e:
-        log.warning(f"[Combo] RFQ submission failed: {e}")
+        log.warning(f"[Combo] Market creation failed: {e}")
         return None
 
-    # ── Step 2: Poll for quote ─────────────────────────────────────────
+    # ── Step 2: Submit RFQ ─────────────────────────────────────────────
+    try:
+        rfq_body = {
+            "market_ticker":         market_ticker,
+            "mve_collection_ticker": "KXMVESPORTSMULTIGAMEEXTENDED-R",
+            "target_cost_dollars":   f"{stake_dollars:.2f}",
+            "rest_remainder":        False,
+            "replace_existing":      True,
+            "mve_selected_legs":     [{"market_ticker": leg.ticker, "side": "yes"} for leg in candidate.legs],
+        }
+        rfq  = _signed_post('/trade-api/v2/communications/rfqs', rfq_body)
+        rfq_id = rfq.get('id')
+        log.info(f"[Combo] RFQ submitted: {rfq_id}")
+    except Exception as e:
+        log.warning(f"[Combo] RFQ failed: {e} | {getattr(getattr(e,'response',None),'text','')[:200]}")
+        return None
+
+    # ── Step 3: Poll for quotes ────────────────────────────────────────
     deadline = time.time() + QUOTE_TIMEOUT_SECS
     quote    = None
+    qp       = '/trade-api/v2/communications/quotes'
 
     while time.time() < deadline:
         try:
-            poll_path = f'/trade-api/v2/communications/rfqs/{rfq_id}'
-            r_poll = requests.get(
-                f"https://api.elections.kalshi.com{poll_path}",
-                headers=_pss_headers("GET", poll_path),
-                timeout=8
-            )
-            data = r_poll.json()
-            quotes = data.get('quotes', [])
-            if quotes:
-                quote = quotes[0]
-                log.info(f"[Combo] Quote received: {quote}")
+            url  = f"{BASE}{qp}?rfq_id={rfq_id}&rfq_creator_user_id={user_id}"
+            qs   = requests.get(url, headers=_pss_headers("GET", qp), timeout=8).json().get('quotes', [])
+            yes_q = [q for q in qs if float(q.get('yes_bid_dollars',0) or 0) > 0 and q.get('status')=='open']
+            if yes_q:
+                quote = max(yes_q, key=lambda q: float(q.get('yes_bid_dollars',0)))
+                log.info(f"[Combo] Best quote: yes_bid={quote['yes_bid_dollars']} contracts={quote.get('yes_contracts_fp')}")
                 break
         except Exception as e:
             log.debug(f"[Combo] Poll error: {e}")
@@ -351,12 +372,11 @@ def submit_rfq(candidate: ComboCandidate,
         log.warning(f"[Combo] No quote received within {QUOTE_TIMEOUT_SECS}s")
         return None
 
-    # ── Step 3: Evaluate quote ─────────────────────────────────────────
-    quote_id   = quote.get('id')
-    yes_bid    = float(quote.get('yes_bid_dollars', 0) or 0)
-    contracts  = float(quote.get('yes_contracts_fp', 1) or 1)
-    ev         = _evaluate_quote(candidate, yes_bid, stake_dollars)
-
+    # ── Step 4: Evaluate quote ─────────────────────────────────────────
+    quote_id  = quote.get('id')
+    yes_bid   = float(quote.get('yes_bid_dollars', 0) or 0)
+    contracts = float(quote.get('yes_contracts_fp', 1) or 1)
+    ev        = _evaluate_quote(candidate, yes_bid, stake_dollars)
     log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
 
     if ev <= 0:
