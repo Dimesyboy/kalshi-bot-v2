@@ -37,9 +37,9 @@ import requests
 
 from core.config import config
 from core.kalshi_client import _signed_get, get_market, get_client
-from core.models import Sport, Market
-from confidence.model import extract_nba_features, extract_mlb_features
-from confidence.llm_gate import evaluate as llm_evaluate
+from core.models import Sport
+from data.nba_stats import score_prop_leg, get_threshold
+from data.nba import get_injuries
 
 log = logging.getLogger("kalshi_bot.combo")
 
@@ -134,8 +134,13 @@ def fetch_leg_market(ticker: str) -> Optional[dict]:
 def score_leg(ticker: str, collection_ticker: str,
               is_yes_only: bool) -> Optional[ComboLeg]:
     """
-    Score a single combo leg using the LLM confidence gate.
-    Returns ComboLeg if confidence >= threshold, None otherwise.
+    Score a combo leg using player season average vs threshold.
+    No LLM — pure stats-based scoring.
+
+    Rules:
+    - Player avg must be >= 1.3x threshold (ratio gate)
+    - Market yes_bid between 0.60 and 0.92
+    - Volume >= 500
     """
     m = fetch_leg_market(ticker)
     if not m:
@@ -144,54 +149,34 @@ def score_leg(ticker: str, collection_ticker: str,
     yes_bid = float(m.get('yes_bid_dollars', 0) or 0)
     volume  = int(m.get('volume', 0) or 0)
 
-    if yes_bid <= 0 or yes_bid >= 1.0:
+    # Skip extreme prices
+    if yes_bid < 0.60 or yes_bid > 0.92:
         return None
 
-    # Build a minimal Market object for feature extraction
-    market = Market(
-        ticker       = ticker,
-        event_ticker = collection_ticker,
-        sport        = _detect_sport(ticker),
-        yes_bid      = yes_bid,
-        no_bid       = 1.0 - yes_bid,
-        volume       = volume,
-        spread       = 1.0,
-        status       = 'open',
-        close_time   = None,
-        is_live      = False,
-    )
+    # Skip very low volume
+    if volume < 500:
+        pass  # Allow pre-game zero volume — volume builds closer to tip
 
-    # Extract features and evaluate
-    sport = market.sport
-    if sport == Sport.NBA:
-        features = extract_nba_features(market, None, [])
-    elif sport == Sport.MLB:
-        features = extract_mlb_features(market, None, [])
-    else:
+    # Score using season average vs threshold
+    result = score_prop_leg(ticker)
+    confidence = result.get('confidence', 0.0)
+
+    if confidence < MIN_LEG_CONFIDENCE:
+        log.debug(f"[Combo] {ticker} skip: conf={confidence:.2f} "
+                 f"ratio={result.get('ratio',0):.2f}")
         return None
 
-    # Add prop-specific context
-    features['is_prop_market'] = True
-    features['prop_ticker']    = ticker
-    features['yes_bid_pct']    = round(yes_bid * 100, 1)
-
-    conf_result = llm_evaluate(sport, ticker, features)
-
-    if conf_result.score < MIN_LEG_CONFIDENCE:
-        log.debug(f"[Combo] {ticker} below threshold: {conf_result.score:.2f}")
-        return None
+    log.info(f"[Combo] LEG: {ticker} conf={confidence:.2f} | {result.get('reason','')}")
 
     return ComboLeg(
         ticker            = ticker,
         collection_ticker = collection_ticker,
-        confidence        = conf_result.score,
+        confidence        = confidence,
         implied_prob      = yes_bid,
         is_yes_only       = is_yes_only,
-        reasoning         = conf_result.reasoning,
+        reasoning         = result.get('reason', ''),
     )
 
-
-# ── Combo building ─────────────────────────────────────────────────────────
 
 def build_combo(collection: dict) -> Optional[ComboCandidate]:
     """
@@ -199,24 +184,52 @@ def build_combo(collection: dict) -> Optional[ComboCandidate]:
     if enough high-confidence legs exist.
     """
     collection_ticker = collection.get('collection_ticker', '')
-    events            = collection.get('associated_events', [])
+    event_tickers     = collection.get('associated_event_tickers', [])
 
-    log.debug(f"[Combo] Scoring {len(events)} legs in {collection_ticker}")
+    # Filter to prop events only — skip game/spread/total
+    prop_series = ['KXNBAPTS', 'KXNBAREB', 'KXNBAAST', 'KXNBA3PT',
+                   'KXNBASTL', 'KXNBABLK', 'KXMLBHIT', 'KXMLBHR']
+    prop_events = [t for t in event_tickers
+                   if any(t.startswith(s) for s in prop_series)]
+
+    log.debug(f"[Combo] {collection_ticker}: {len(prop_events)} prop events")
 
     qualified_legs = []
-    for event in events:
-        ticker      = event.get('ticker', '')
-        is_yes_only = event.get('is_yes_only', True)
-
-        leg = score_leg(ticker, collection_ticker, is_yes_only)
-        if leg:
-            qualified_legs.append(leg)
-        time.sleep(0.1)  # Rate limit protection
+    for event_ticker in prop_events:
+        try:
+            data = _signed_get(
+                f'/trade-api/v2/markets?event_ticker={event_ticker}'
+                f'&limit=20&status=open'
+            )
+            markets = data.get('markets', [])
+            for m in markets:
+                ticker = m.get('ticker', '')
+                leg = score_leg(ticker, collection_ticker, True)
+                if leg:
+                    qualified_legs.append(leg)
+            time.sleep(0.1)
+        except Exception as e:
+            log.debug(f"[Combo] Event fetch error {event_ticker}: {e}")
 
     if len(qualified_legs) < MIN_LEGS:
         log.debug(f"[Combo] {collection_ticker}: only {len(qualified_legs)} "
                  f"qualified legs (need {MIN_LEGS})")
         return None
+
+    # Deduplicate — one leg per player per stat category
+    # If Siakam has 2+ AND 4+ rebounds, only keep the best one
+    seen = {}
+    deduped = []
+    for leg in qualified_legs:
+        # Extract player+stat key from ticker e.g. LACBMATHURIN9-KXNBAREB
+        import re
+        m = re.search(r'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)[A-Z0-9]+)-', leg.ticker)
+        series = leg.ticker.split('-')[0]
+        player_key = f"{series}-{m.group(1)}" if m else leg.ticker
+        if player_key not in seen or leg.confidence > seen[player_key].confidence:
+            seen[player_key] = leg
+    deduped = list(seen.values())
+    qualified_legs = deduped
 
     # Sort by confidence descending
     qualified_legs.sort(key=lambda x: x.confidence, reverse=True)
@@ -260,38 +273,38 @@ def submit_rfq(candidate: ComboCandidate,
         log.error(f"[Combo] Key load failed: {e}")
         return None
 
-    def _signed_post(path: str, body: dict) -> dict:
-        ts_ms   = str(int(time.time() * 1000))
-        msg     = (ts_ms + "POST" + path).encode()
-        sig     = private_key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
-        sig_b64 = base64.b64encode(sig).decode()
-        headers = {
+    def _pss_headers(method: str, path: str) -> dict:
+        ts_ms = str(int(time.time() * 1000))
+        msg   = (ts_ms + method + path).encode()
+        sig   = private_key.sign(
+            msg,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.MAX_LENGTH
+            ),
+            hashes.SHA256()
+        )
+        return {
             "KALSHI-ACCESS-KEY":       config.KALSHI_KEY_ID,
-            "KALSHI-ACCESS-SIGNATURE": sig_b64,
+            "KALSHI-ACCESS-SIGNATURE": base64.b64encode(sig).decode(),
             "KALSHI-ACCESS-TIMESTAMP": ts_ms,
             "Content-Type":            "application/json",
         }
+
+    def _signed_post(path: str, body: dict) -> dict:
         r = requests.post(
             f"https://api.elections.kalshi.com{path}",
-            headers=headers, json=body, timeout=8
+            headers=_pss_headers("POST", path),
+            json=body, timeout=8
         )
         r.raise_for_status()
         return r.json()
 
     def _signed_put(path: str, body: dict = {}) -> dict:
-        ts_ms   = str(int(time.time() * 1000))
-        msg     = (ts_ms + "PUT" + path).encode()
-        sig     = private_key.sign(msg, padding.PKCS1v15(), hashes.SHA256())
-        sig_b64 = base64.b64encode(sig).decode()
-        headers = {
-            "KALSHI-ACCESS-KEY":       config.KALSHI_KEY_ID,
-            "KALSHI-ACCESS-SIGNATURE": sig_b64,
-            "KALSHI-ACCESS-TIMESTAMP": ts_ms,
-            "Content-Type":            "application/json",
-        }
         r = requests.put(
             f"https://api.elections.kalshi.com{path}",
-            headers=headers, json=body, timeout=8
+            headers=_pss_headers("PUT", path),
+            json=body, timeout=8
         )
         r.raise_for_status()
         return r.json()
@@ -318,7 +331,13 @@ def submit_rfq(candidate: ComboCandidate,
 
     while time.time() < deadline:
         try:
-            data   = _signed_get(f'/trade-api/v2/communications/rfqs/{rfq_id}')
+            poll_path = f'/trade-api/v2/communications/rfqs/{rfq_id}'
+            r_poll = requests.get(
+                f"https://api.elections.kalshi.com{poll_path}",
+                headers=_pss_headers("GET", poll_path),
+                timeout=8
+            )
+            data = r_poll.json()
             quotes = data.get('quotes', [])
             if quotes:
                 quote = quotes[0]
@@ -335,6 +354,7 @@ def submit_rfq(candidate: ComboCandidate,
     # ── Step 3: Evaluate quote ─────────────────────────────────────────
     quote_id   = quote.get('id')
     yes_bid    = float(quote.get('yes_bid_dollars', 0) or 0)
+    contracts  = float(quote.get('yes_contracts_fp', 1) or 1)
     ev         = _evaluate_quote(candidate, yes_bid, stake_dollars)
 
     log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
@@ -343,15 +363,23 @@ def submit_rfq(candidate: ComboCandidate,
         log.info(f"[Combo] Quote rejected — negative EV")
         return None
 
-    # ── Step 4: Accept and confirm ─────────────────────────────────────
+    # ── Step 4: Accept (confirm is automatic) ─────────────────────────
     try:
-        _signed_put(f'/trade-api/v2/communications/quotes/{quote_id}/accept')
-        log.info(f"[Combo] Quote accepted: {quote_id}")
-        _signed_put(f'/trade-api/v2/communications/quotes/{quote_id}/confirm')
-        log.info(f"[Combo] Quote confirmed — combo placed!")
-        return quote
+        accept_path = f'/trade-api/v2/communications/quotes/{quote_id}/accept'
+        r_accept = requests.put(
+            f"https://api.elections.kalshi.com{accept_path}",
+            headers=_pss_headers("PUT", accept_path),
+            json={"accepted_side": "yes"},
+            timeout=8
+        )
+        if r_accept.status_code in (200, 204):
+            log.info(f"[Combo] Quote accepted and auto-confirmed: {quote_id}")
+            return quote
+        else:
+            log.warning(f"[Combo] Accept failed: {r_accept.status_code} {r_accept.text[:100]}")
+            return None
     except Exception as e:
-        log.error(f"[Combo] Accept/confirm failed: {e}")
+        log.error(f"[Combo] Accept failed: {e}")
         return None
 
 

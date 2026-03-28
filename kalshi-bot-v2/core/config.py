@@ -96,6 +96,7 @@ class Config:
     ESPN_BASE:              str   = "https://site.api.espn.com/apis/site/v2/sports"
 
     # ── Telegram ──────────────────────────────────────────────────────────
+    KALSHI_USER_ID:         str   = os.getenv("KALSHI_USER_ID", "")
     TELEGRAM_BOT_TOKEN:     str   = os.getenv("TELEGRAM_BOT_TOKEN", "")
     TELEGRAM_CHAT_ID:       str   = os.getenv("TELEGRAM_CHAT_ID", "")
 
