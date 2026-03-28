@@ -400,35 +400,133 @@ def _evaluate_quote(candidate: ComboCandidate,
 
 # ── Main scanner ───────────────────────────────────────────────────────────
 
+# Prop series to scan
+PROP_SERIES = ['KXNBAPTS', 'KXNBAREB', 'KXNBAAST', 'KXNBA3PT', 'KXNBASTL']
+
+# Min/max yes_bid for combo legs
+LEG_MIN_BID = 0.60
+LEG_MAX_BID = 0.88   # Cap at 88% — above this barely adds payout
+
+# Combo sizing
+MIN_COMBO_LEGS       = 4
+MAX_COMBO_LEGS       = 8
+MIN_COMBINED_CONF    = 0.02   # 2% floor
+MIN_PAYOUT_MULT      = 5.0    # Minimum expected payout multiplier
+
+
+def scan_all_props() -> list[ComboLeg]:
+    """
+    Scan all open NBA prop markets across all games.
+    Score each leg, dedupe by player, return sorted by payout contribution.
+    """
+    import re
+    all_legs = []
+    seen_players = {}  # player_key → best leg
+
+    for series in PROP_SERIES:
+        try:
+            from core.kalshi_client import _signed_get
+            data = _signed_get(
+                f'/trade-api/v2/markets?series_ticker={series}&limit=200&status=open'
+            )
+            for m in data.get('markets', []):
+                ticker  = m.get('ticker', '')
+                yes_bid = float(m.get('yes_bid_dollars', 0) or 0)
+
+                if not (LEG_MIN_BID <= yes_bid <= LEG_MAX_BID):
+                    continue
+
+                result = score_prop_leg(ticker)
+                conf   = result.get('confidence', 0.0)
+                if conf < MIN_LEG_CONFIDENCE:
+                    continue
+
+                # Extract player key for dedup — one leg per player total
+                pm = re.search(
+                    r'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)[A-Z0-9]+)-',
+                    ticker
+                )
+                player_key = pm.group(1) if pm else ticker
+
+                leg = ComboLeg(
+                    ticker            = ticker,
+                    collection_ticker = 'KXMVESPORTSMULTIGAMEEXTENDED-R',
+                    confidence        = conf,
+                    implied_prob      = yes_bid,
+                    is_yes_only       = True,
+                    reasoning         = result.get('reason', ''),
+                )
+
+                # Keep lowest-price leg per player (best payout contribution)
+                if player_key not in seen_players or yes_bid < seen_players[player_key].implied_prob:
+                    seen_players[player_key] = leg
+
+            time.sleep(0.5)
+        except Exception as e:
+            log.warning(f"[Combo] Prop scan failed {series}: {e}")
+
+    # Sort by payout contribution (lowest price first)
+    deduped = sorted(seen_players.values(), key=lambda x: x.implied_prob)
+    log.info(f"[Combo] Found {len(deduped)} unique qualified legs")
+    return deduped
+
+
+def build_best_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
+    """
+    Build the best combo from available legs.
+    Pick legs that maximize payout while keeping combined confidence above floor.
+    """
+    if len(legs) < MIN_COMBO_LEGS:
+        log.info(f"[Combo] Not enough legs: {len(legs)} < {MIN_COMBO_LEGS}")
+        return None
+
+    # Take top legs by payout contribution up to MAX_COMBO_LEGS
+    selected = legs[:MAX_COMBO_LEGS]
+
+    candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', selected)
+
+    if candidate.combined_confidence < MIN_COMBINED_CONF:
+        log.info(f"[Combo] Combined conf too low: {candidate.combined_confidence:.3f}")
+        return None
+
+    if candidate.expected_payout < MIN_PAYOUT_MULT:
+        log.info(f"[Combo] Payout too low: {candidate.expected_payout:.1f}x")
+        return None
+
+    log.info(f"[Combo] CANDIDATE: {len(selected)} legs, "
+             f"conf={candidate.combined_confidence:.3f}, "
+             f"payout={candidate.expected_payout:.1f}x")
+    for leg in selected:
+        log.info(f"  {leg.ticker} yes={leg.implied_prob:.2f} conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
+
+    return candidate
+
+
 def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
     """
-    Main entry point. Scan all collections, build combos, execute if EV+.
-    Returns list of candidates found (whether executed or not).
+    Main entry point. Scan all props, build best combo, execute if EV+.
     """
     log.info("[Combo] Starting combo scan")
     candidates = []
 
-    for series in [MVE_NBA_SERIES, MVE_MLB_SERIES]:
-        collections = fetch_collections(series)
-        log.info(f"[Combo] {series}: {len(collections)} collections to evaluate")
+    legs      = scan_all_props()
+    candidate = build_best_combo(legs)
 
-        for collection in collections:
-            candidate = build_combo(collection)
-            if not candidate:
-                continue
+    if not candidate:
+        log.info("[Combo] No valid combo found")
+        return candidates
 
-            candidates.append(candidate)
+    candidates.append(candidate)
 
-            if dry_run:
-                log.info(f"[Combo] DRY RUN — would submit RFQ for {candidate}")
-                continue
+    if dry_run:
+        log.info(f"[Combo] DRY RUN — would submit RFQ")
+        return candidates
 
-            quote = submit_rfq(candidate)
-            if quote:
-                log.info(f"[Combo] EXECUTED: {candidate.collection_ticker}")
-                _log_combo_trade(candidate, quote)
+    quote = submit_rfq(candidate)
+    if quote:
+        log.info(f"[Combo] EXECUTED")
+        _log_combo_trade(candidate, quote)
 
-    log.info(f"[Combo] Scan complete — {len(candidates)} candidates found")
     return candidates
 
 
