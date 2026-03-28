@@ -481,7 +481,7 @@ def scan_all_props() -> list[ComboLeg]:
                 if player_key not in seen_players or yes_bid < seen_players[player_key].implied_prob:
                     seen_players[player_key] = leg
 
-            time.sleep(0.5)
+            time.sleep(1.5)
         except Exception as e:
             log.warning(f"[Combo] Prop scan failed {series}: {e}")
 

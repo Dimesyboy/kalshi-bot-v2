@@ -27,7 +27,7 @@ TEAM_CODE_MAP = {
     "MIL": "MIL", "MIN": "MIN", "NOP": "NO",  "NYK": "NY",
     "OKC": "OKC", "ORL": "ORL", "PHI": "PHI", "PHX": "PHX",
     "POR": "POR", "SAC": "SAC", "SAS": "SA",  "TOR": "TOR",
-    "UTA": "UTA", "WAS": "WSH",
+    "UTA": "UTAH", "WAS": "WSH",
 }
 
 
