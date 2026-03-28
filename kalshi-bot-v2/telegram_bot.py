@@ -35,17 +35,29 @@ ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
 
 # ── LLM reasoning ─────────────────────────────────────────────────────────
 
+STAT_LABELS = {
+    'KXNBAPTS': 'points', 'KXNBAREB': 'rebounds',
+    'KXNBAAST': 'assists', 'KXNBA3PT': 'threes',
+    'KXNBASTL': 'steals',  'KXNBABLK': 'blocks',
+}
+
 def explain_leg(leg) -> str:
     """Ask Claude Haiku to explain why this leg is a good pick in one sentence."""
     if not config.ANTHROPIC_API_KEY:
         return f"avg {leg.reasoning.split('avg')[1].split('→')[0].strip() if 'avg' in leg.reasoning else ''}"
 
-    prompt = f"""You are a sharp sports analyst. Explain in ONE concise sentence (max 12 words) why this prop is a good combo leg tonight.
+    series    = leg.ticker.split('-')[0]
+    stat_name = STAT_LABELS.get(series, 'stat')
+    threshold = leg.ticker.split('-')[-1]
 
-Leg: {leg.reasoning}
+    prompt = f"""You are a sharp sports analyst. Explain in ONE concise sentence (max 12 words) why this player prop is a good combo leg tonight.
 
-Focus on: why the player is likely to hit the threshold. Be specific, not generic.
-Just the sentence, no preamble."""
+Player stat: {leg.reasoning}
+Stat type: {stat_name}
+Threshold: {threshold}+
+
+Focus specifically on {stat_name} — why will this player get {threshold}+ {stat_name} tonight?
+Be specific and accurate. Just the sentence, no preamble."""
 
     try:
         headers = {
@@ -77,11 +89,17 @@ def format_parlay_message(candidate, legs_with_reasons: list[tuple]) -> str:
     games = {}
     for leg, reason in legs_with_reasons:
         # Extract game from ticker e.g. KXNBAPTS-26MAR29NYKOKC → NYK vs OKC
+        import re as _re
         parts = leg.ticker.split('-')
         if len(parts) >= 2:
-            game_code = parts[1][5:]  # e.g. NYKOKC
-            t1, t2 = game_code[:3], game_code[3:6]
-            game_key = f"{t1} vs {t2}"
+            # e.g. 26MAR29NYKOKC → extract NYKOKC
+            m = _re.search(r'\d{2}[A-Z]{3}\d{2}([A-Z]{6})', parts[1])
+            if m:
+                code = m.group(1)
+                t1, t2 = code[:3], code[3:6]
+                game_key = f"{t1} vs {t2}"
+            else:
+                game_key = parts[1]
         else:
             game_key = "Other"
         games.setdefault(game_key, []).append((leg, reason))
