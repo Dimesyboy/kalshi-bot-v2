@@ -461,12 +461,14 @@ def scan_all_props() -> list[ComboLeg]:
                 if conf < MIN_LEG_CONFIDENCE:
                     continue
 
-                # Extract player key for dedup — one leg per player total
+                # Dedup: one leg per player per stat category
+                # e.g. Curry points + Curry threes = OK, two Curry points thresholds = not OK
+                series     = ticker.split('-')[0]  # e.g. KXNBAPTS
                 pm = re.search(
                     r'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)[A-Z0-9]+)-',
                     ticker
                 )
-                player_key = pm.group(1) if pm else ticker
+                player_key = f"{series}-{pm.group(1)}" if pm else ticker
 
                 leg = ComboLeg(
                     ticker            = ticker,
