@@ -67,8 +67,23 @@ def run_scan():
     )
 
 
+def warm_cache():
+    """Refresh cache with latest player data."""
+    log.info("Warming cache...")
+    try:
+        from data.warm_cache import warm_all_rosters, warm_player_ids, warm_player_averages, warm_game_logs
+        warm_all_rosters()
+        warm_player_ids()
+        warm_player_averages()
+        warm_game_logs()
+        log.info("Cache warm complete")
+    except Exception as e:
+        log.warning(f"Cache warm failed: {e}")
+
+
 def main():
     log.info("Combo Scheduler starting")
+    warm_cache()
     log.info("Fetching today's NBA schedule...")
 
     tip_times = get_todays_tip_times()
