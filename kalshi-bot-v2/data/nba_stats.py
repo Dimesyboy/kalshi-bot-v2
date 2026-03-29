@@ -115,6 +115,48 @@ def _find_player(espn_team: str, player_code: str) -> tuple:
     return (None, None)
 
 
+def get_injury_status(espn_id: str, espn_team: str) -> str:
+    """
+    Return injury status for a player: 'active', 'out', 'doubtful', 'questionable'.
+    Uses ESPN roster endpoint which includes injury status.
+    """
+    cache_key = f"injury_{espn_team}"
+    roster = stats_cache.get(cache_key)
+    if roster is None:
+        try:
+            r = requests.get(
+                f"{ESPN_BASE}/teams/{espn_team}/roster",
+                timeout=6
+            )
+            r.raise_for_status()
+            roster = r.json().get('athletes', [])
+            stats_cache.set(cache_key, roster, ttl=300)  # 5 min — injuries change
+        except Exception as e:
+            log.warning(f"[NBAStats] Roster fetch failed {espn_team}: {e}")
+            return 'active'
+
+    for athlete in roster:
+        if athlete.get('id') == espn_id:
+            # Check injuries array first — most accurate
+            injuries = athlete.get('injuries', [])
+            if injuries:
+                s = injuries[0].get('status', 'Active').lower()
+            else:
+                status = athlete.get('status', {})
+                if isinstance(status, dict):
+                    s = status.get('type', 'active').lower()
+                else:
+                    s = str(status).lower()
+            if 'out' in s:
+                return 'out'
+            if 'doubtful' in s:
+                return 'doubtful'
+            if 'questionable' in s:
+                return 'questionable'
+            return 'active'
+    return 'active'
+
+
 def _fetch_averages(espn_id: str, full_name: str) -> dict:
     """Fetch current season per-game averages from ESPN."""
     try:
@@ -207,6 +249,20 @@ def score_prop_leg(ticker: str) -> dict:
     if not avgs:
         return {'confidence': 0.0, 'reason': 'No stats available'}
 
+    # Check injury status — skip injured players
+    espn_id   = avgs.get('espn_id', '')
+    parsed    = _parse_ticker(ticker)
+    if parsed and espn_id:
+        team_code = parsed[0]
+        espn_team = TEAM_CODE_MAP.get(team_code, team_code)
+        status    = get_injury_status(espn_id, espn_team)
+        if status in ('out', 'doubtful'):
+            log.debug(f"[NBAStats] {avgs.get('player_name')} is {status} — skipping")
+            return {'confidence': 0.0, 'reason': f"{avgs.get('player_name')} is {status} tonight", 'injured': True}
+        if status == 'questionable':
+            log.debug(f"[NBAStats] {avgs.get('player_name')} is questionable — reducing confidence")
+            # Will apply 0.1 penalty to confidence below
+
     series    = get_stat_series(ticker)
     threshold = get_threshold(ticker)
     avg_stat  = get_prop_stat(avgs, series)
@@ -228,8 +284,21 @@ def score_prop_leg(ticker: str) -> dict:
     else:
         confidence = 0.0  # Too close — skip
 
+    # Apply questionable penalty
+    injury_note = ""
+    if confidence > 0:
+        parsed2 = _parse_ticker(ticker)
+        espn_id2 = avgs.get("espn_id", "")
+        if parsed2 and espn_id2:
+            team_code2 = parsed2[0]
+            espn_team2 = TEAM_CODE_MAP.get(team_code2, team_code2)
+            status2    = get_injury_status(espn_id2, espn_team2)
+            if status2 == "questionable":
+                confidence = round(max(0, confidence - 0.10), 2)
+                injury_note = " [questionable]"
+
     reason = (f"{avgs['player_name']} avg {avg_stat:.1f} vs threshold {threshold} "
-              f"(ratio={ratio:.2f}) → conf={confidence:.2f}")
+              f"(ratio={ratio:.2f}) → conf={confidence:.2f}{injury_note}")
 
     return {
         'confidence':   confidence,
