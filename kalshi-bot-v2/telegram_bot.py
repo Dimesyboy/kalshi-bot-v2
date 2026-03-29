@@ -221,16 +221,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "stats":
         try:
             paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
-            v1_file    = "/root/trade_log.csv"
+            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"
             lines      = ["📊 *Trading Stats*\n"]
 
-            # V1 live stats
-            if os.path.exists(v1_file):
-                rows = list(csv.DictReader(open(v1_file)))
+            # V2 live stats
+            if os.path.exists(v2_log):
+                rows = list(csv.DictReader(open(v2_log)))
                 total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
-                lines.append(f"*V1 Bot (live)*")
+                lines.append(f"*V2 Bot*")
                 lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\n")
-
+            else:
+                lines.append("*V2 Bot*\nNo live trades yet\n")
             # V2 paper stats
             if os.path.exists(paper_file):
                 rows     = list(csv.DictReader(open(paper_file)))
@@ -289,7 +290,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     )
             else:
                 await query.edit_message_text(
-                    "📋 No positions file found",
+                    "📋 No open positions",
                     reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
                 )
         except Exception as e:
