@@ -138,12 +138,13 @@ def format_parlay(candidate, legs_with_reasons: list) -> str:
 
 def main_menu_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🎯 Best Parlay", callback_data="parlay"),
-         InlineKeyboardButton("📊 Stats",       callback_data="stats")],
-        [InlineKeyboardButton("💵 Balance",     callback_data="balance"),
-         InlineKeyboardButton("📋 Positions",   callback_data="positions")],
-        [InlineKeyboardButton("⚙️ Settings",    callback_data="settings"),
-         InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],
+        [InlineKeyboardButton("🎯 Moonshot",    callback_data="parlay"),
+         InlineKeyboardButton("💪 Monster",     callback_data="highconf")],
+        [InlineKeyboardButton("📊 Stats",       callback_data="stats"),
+         InlineKeyboardButton("💵 Balance",     callback_data="balance")],
+        [InlineKeyboardButton("📋 Positions",   callback_data="positions"),
+         InlineKeyboardButton("⚙️ Settings",    callback_data="settings")],
+        [InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],
     ])
 
 def settings_keyboard():
@@ -211,6 +212,32 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup([[
                     InlineKeyboardButton("🔄 Rescan", callback_data="parlay"),
+                    InlineKeyboardButton("🔙 Menu",   callback_data="menu")
+                ]])
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Error: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
+
+    elif data == "highconf":
+        await query.edit_message_text("🔍 Finding monster combo...")
+        try:
+            from combo_scanner import scan_all_props, build_highconf_combo
+            legs      = scan_all_props()
+            candidate = build_highconf_combo(legs)
+            if not candidate:
+                await query.edit_message_text(
+                    "❌ No high confidence combo right now.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+                )
+                return
+            await query.edit_message_text(f"✅ Found {len(candidate.legs)}-leg monster — analysing...")
+            legs_with_reasons = [(leg, explain_leg(leg)) for leg in candidate.legs]
+            msg = format_parlay(candidate, legs_with_reasons)
+            await query.edit_message_text(
+                msg, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Rescan", callback_data="highconf"),
                     InlineKeyboardButton("🔙 Menu",   callback_data="menu")
                 ]])
             )
