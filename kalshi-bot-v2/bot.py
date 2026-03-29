@@ -1,3 +1,4 @@
+import signal
 #!/usr/bin/env python3
 """
 bot.py
@@ -19,7 +20,6 @@ Flow each cycle:
 import json
 import logging
 import os
-import signal
 import sys
 import time
 import uuid
@@ -364,40 +364,40 @@ def run_bot():
                             continue
 
                         try:
-                            signal = strategy.evaluate(market, history, context)
+                            trade_signal = strategy.evaluate(market, history, context)
                         except Exception as e:
                             log.debug(f"[Strategy] {strategy.name} error on {market.ticker}: {e}")
                             continue
 
-                        if not signal:
+                        if not trade_signal:
                             continue
 
                         signals_found += 1
 
                         # Place order
                         if config.DRY_RUN:
-                            log.info(f"[DRY RUN] Would place: {signal.market_ticker} "
-                                    f"{signal.side.value.upper()} @ {signal.price}c")
+                            log.info(f"[DRY RUN] Would place: {trade_trade_signal.market_ticker} "
+                                    f"{trade_trade_signal.side.value.upper()} @ {trade_trade_signal.price}c")
                             continue
 
-                        if balance < signal.price * signal.contracts / 100.0:
-                            log.warning(f"[Bot] Insufficient balance for {signal.market_ticker}")
+                        if balance < trade_signal.price * trade_signal.contracts / 100.0:
+                            log.warning(f"[Bot] Insufficient balance for {trade_signal.market_ticker}")
                             continue
 
                         client_order_id = str(uuid.uuid4())
                         order_id = place_order(
-                            ticker          = signal.market_ticker,
-                            side            = signal.side.value,
-                            price_cents     = signal.price,
-                            contracts       = signal.contracts,
+                            ticker          = trade_signal.market_ticker,
+                            side            = trade_signal.side.value,
+                            price_cents     = trade_signal.price,
+                            contracts       = trade_signal.contracts,
                             client_order_id = client_order_id,
                         )
 
                         if order_id:
                             from strategies.base import calculate_fee
                             entry_fee = calculate_fee(
-                                signal.contracts,
-                                signal.price / 100.0,
+                                trade_signal.contracts,
+                                trade_signal.price / 100.0,
                                 is_maker=True
                             )
                             bot_orders.add(order_id)
@@ -406,12 +406,12 @@ def run_bot():
                             order_mgr.add_pending(
                                 signal      = signal,
                                 order_id    = order_id,
-                                contracts   = signal.contracts,
-                                entry_price = signal.price,
+                                contracts   = trade_signal.contracts,
+                                entry_price = trade_signal.price,
                                 entry_fee   = entry_fee,
                             )
 
-                            signal_cooldown[signal.market_ticker] = (
+                            signal_cooldown[trade_signal.market_ticker] = (
                                 now_ts + config.SIGNAL_COOLDOWN_SECS
                             )
                             _atomic_write(COOLDOWN_FILE, signal_cooldown)

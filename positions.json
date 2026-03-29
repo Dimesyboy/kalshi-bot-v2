@@ -1,1 +1,16 @@
-{}
+{
+  "KXMLBGAME-26MAR282110AZLAD-LAD": {
+    "side": "no",
+    "entry_price": 12,
+    "peak_price": 12,
+    "last_bid": 10,
+    "contracts": 20,
+    "strategy": "value_fade",
+    "entry_time": "2026-03-29T03:30:55.104308+00:00",
+    "event_ticker": "KXMLBGAME-26MAR282110AZLAD",
+    "reason": "Fade 87c | NO=12c vol=2600230 sprd=1.0c conf=0.6 | no ESPN context \u2014 base confidence",
+    "entry_fee": 0.04,
+    "order_id": "d9f6ebe7-efd3-4558-b0b1-642815bcdbf8",
+    "is_bot": true
+  }
+}

@@ -7,3 +7,5 @@
 [user]
 	email = dimesyboy@gmail.com
 	name = Dimesyboy
+[credential]
+	helper = store

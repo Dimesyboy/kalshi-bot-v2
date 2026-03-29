@@ -280,20 +280,13 @@ def reconcile_positions(open_positions,kalshi_base,client,save_fn,pnl_log,curren
                     log.info(f"[Reconcile] {ticker} only {int(age)}s old — keeping, fills may not have propagated")
                     continue
         except: pass
-        # Check if there is a resting (unfilled) bot order for this ticker
-        # If so, keep the position — the order just hasn't filled yet
+        # If this position was placed by the bot, never remove it until
+        # the fill appears in the fills API or the market settles.
+        # get_orders() only returns last 50 — unreliable for older orders.
         order_id = pos.get("order_id","")
         if order_id and bot_orders and order_id in bot_orders:
-            try:
-                import kalshi_python
-                pa = kalshi_python.PortfolioApi(api_client=client)
-                resp = pa.get_orders(limit=50)
-                resting = {o.order_id for o in (resp.orders or []) if o.status in ("resting","pending","executed")}
-                if order_id in resting:
-                    log.info(f"[Reconcile] {ticker} order {order_id} order active (resting/executed) — keeping position")
-                    continue
-            except Exception as e:
-                log.debug(f"[Reconcile] order check {ticker}: {e}")
+            log.info(f"[Reconcile] {ticker} is a bot order — keeping until fill propagates")
+            continue
         try:
             r=requests.get(f"{kalshi_base}/markets/{ticker}",timeout=8); r.raise_for_status()
             ms=r.json().get("market",{}).get("status","")
