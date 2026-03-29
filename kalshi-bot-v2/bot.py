@@ -303,7 +303,7 @@ def run_bot():
     recover_on_startup(open_positions, bot_orders, save_positions)
 
     # ── Telegram ───────────────────────────────────────────────────────────
-    send_startup(balance, config.DRY_RUN, config.LLM_ASSIST)
+    # send_startup(balance, config.DRY_RUN, config.LLM_ASSIST)
 
     # ── Signal handler ─────────────────────────────────────────────────────
     def _shutdown(sig, frame):
@@ -422,7 +422,7 @@ def run_bot():
                         break  # One strategy per market per cycle
 
             # Cycle report every 10 cycles
-            if cycle % 50 == 0:
+            if False and cycle % 50 == 0:  # disabled
                 send_cycle_report(
                     cycle         = cycle,
                     balance       = balance,
