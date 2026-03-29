@@ -427,11 +427,16 @@ PROP_SERIES = ['KXNBAPTS', 'KXNBAREB', 'KXNBAAST', 'KXNBA3PT', 'KXNBASTL']
 LEG_MIN_BID = 0.58
 LEG_MAX_BID = 0.85   # Cap at 88% — above this barely adds payout
 
-# Combo sizing
+# Combo sizing — MOONSHOT mode (default)
 MIN_COMBO_LEGS       = 6
 MAX_COMBO_LEGS       = 12
-MIN_COMBINED_CONF    = 0.005   # 2% floor
-MIN_PAYOUT_MULT      = 15.0    # Minimum expected payout multiplier
+MIN_COMBINED_CONF    = 0.005
+MIN_PAYOUT_MULT      = 15.0
+
+# HIGH CONFIDENCE mode thresholds
+HC_MIN_CONF          = 0.82    # Only legs with 82%+ model confidence
+HC_MAX_LEGS          = 30      # No cap — take all qualifying legs
+HC_MIN_PAYOUT        = 2.0     # Low payout floor, we want hit rate
 
 
 def scan_all_props() -> list[ComboLeg]:
@@ -573,7 +578,7 @@ def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
     return candidates
 
 
-def _log_combo_trade(candidate: ComboCandidate, quote: dict):
+def _log_combo_trade(candidate: ComboCandidate, quote: dict, mode: str = "moonshot"):
     """Log a placed combo trade to combo_trades.json."""
     import os
     log_file = "/root/kalshi-bot-v2/data/combo_trades.json"
@@ -616,3 +621,33 @@ if __name__ == "__main__":
     if dry_run:
         log.info("Running in DRY RUN mode (pass --live to execute)")
     scan_and_execute(dry_run=dry_run)
+
+
+def build_highconf_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
+    """
+    HIGH CONFIDENCE mode: take ALL legs above confidence threshold.
+    Maximizes hit rate over payout size.
+    """
+    hc_legs = sorted(
+        [l for l in legs if l.confidence >= HC_MIN_CONF],
+        key=lambda x: x.confidence,
+        reverse=True
+    )[:HC_MAX_LEGS]
+
+    if len(hc_legs) < 2:
+        log.info(f"[Combo] HC: not enough high-conf legs ({len(hc_legs)})")
+        return None
+
+    candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', hc_legs)
+
+    if candidate.expected_payout < HC_MIN_PAYOUT:
+        log.info(f"[Combo] HC payout too low: {candidate.expected_payout:.1f}x")
+        return None
+
+    log.info(f"[Combo] HIGH CONF: {len(hc_legs)} legs, "
+             f"conf={candidate.combined_confidence:.3f}, "
+             f"payout={candidate.expected_payout:.1f}x")
+    for leg in hc_legs:
+        log.info(f"  conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
+
+    return candidate
