@@ -422,7 +422,7 @@ def run_bot():
                         break  # One strategy per market per cycle
 
             # Cycle report every 10 cycles
-            if cycle % 10 == 0:
+            if cycle % 50 == 0:
                 send_cycle_report(
                     cycle         = cycle,
                     balance       = balance,

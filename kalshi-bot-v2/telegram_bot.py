@@ -165,7 +165,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "🤖 *Kalshi Bot v2*",
+        "🤖 *Kalshi Bot v2* — What would you like to do?",
         parse_mode="Markdown",
         reply_markup=main_menu_keyboard()
     )
