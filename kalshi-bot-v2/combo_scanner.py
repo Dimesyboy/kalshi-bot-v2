@@ -359,7 +359,7 @@ def submit_rfq(candidate: ComboCandidate,
         try:
             url  = f"{BASE}{qp}?rfq_id={rfq_id}&rfq_creator_user_id={user_id}"
             qs   = requests.get(url, headers=_pss_headers("GET", qp), timeout=8).json().get('quotes', [])
-            yes_q = [q for q in qs if float(q.get('yes_bid_dollars',0) or 0) > 0 and q.get('status')=='open']
+            yes_q = [q for q in qs if float(q.get('yes_bid_dollars',0) or 0) >= 0.05 and q.get('status')=='open']
             if yes_q:
                 quote = max(yes_q, key=lambda q: float(q.get('yes_bid_dollars',0)))
                 log.info(f"[Combo] Best quote: yes_bid={quote['yes_bid_dollars']} contracts={quote.get('yes_contracts_fp')}")
@@ -552,28 +552,40 @@ def build_best_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
 
 def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
     """
-    Main entry point. Scan all props, build best combo, execute if EV+.
+    Main entry point. Runs MOONSHOT + HIGH CONFIDENCE combos.
     """
-    log.info("[Combo] Starting combo scan")
+    log.info("[Combo] Starting combo scan — MOONSHOT + HIGH CONF modes")
     candidates = []
+    legs       = scan_all_props()
 
-    legs      = scan_all_props()
-    candidate = build_best_combo(legs)
+    # ── MOONSHOT ───────────────────────────────────────────────────────
+    moonshot = build_best_combo(legs)
+    if moonshot:
+        candidates.append(moonshot)
+        if dry_run:
+            log.info(f"[Combo] DRY RUN — MOONSHOT {len(moonshot.legs)} legs {moonshot.expected_payout:.1f}x")
+        else:
+            log.info("[Combo] Submitting MOONSHOT...")
+            quote = submit_rfq(moonshot)
+            if quote:
+                log.info("[Combo] MOONSHOT EXECUTED")
+                _log_combo_trade(moonshot, quote, mode="moonshot")
 
-    if not candidate:
-        log.info("[Combo] No valid combo found")
-        return candidates
+    # ── HIGH CONFIDENCE ────────────────────────────────────────────────
+    highconf = build_highconf_combo(legs)
+    if highconf:
+        candidates.append(highconf)
+        if dry_run:
+            log.info(f"[Combo] DRY RUN — HIGH CONF {len(highconf.legs)} legs {highconf.expected_payout:.1f}x")
+        else:
+            log.info("[Combo] Submitting HIGH CONF...")
+            quote = submit_rfq(highconf)
+            if quote:
+                log.info("[Combo] HIGH CONF EXECUTED")
+                _log_combo_trade(highconf, quote, mode="highconf")
 
-    candidates.append(candidate)
-
-    if dry_run:
-        log.info(f"[Combo] DRY RUN — would submit RFQ")
-        return candidates
-
-    quote = submit_rfq(candidate)
-    if quote:
-        log.info(f"[Combo] EXECUTED")
-        _log_combo_trade(candidate, quote)
+    if not candidates:
+        log.info("[Combo] No valid combos found")
 
     return candidates
 
