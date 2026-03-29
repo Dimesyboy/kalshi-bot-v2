@@ -1,5 +1,3 @@
-    print(f'Ticker: {market_ticker}')
-
     # RFQ
     rfq_path = '/trade-api/v2/communications/rfqs'
     rfq_body = {
@@ -1998,3 +1996,5 @@ from data.nba_stats import get_injury_status
 result = get_injury_status('3032977', 'MIL')
 print(f'Giannis status: {result}')
 " 2>&1 | grep -v DEBUG
+cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py
+cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scanner.py --live

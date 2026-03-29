@@ -140,11 +140,12 @@ def get_injury_status(espn_id: str, espn_team: str) -> str:
             # Check injuries array first — most accurate
             injuries = athlete.get('injuries', [])
             if injuries:
-                s = injuries[0].get('status', 'Active').lower()
+                s = str(injuries[0].get('status', 'Active')).lower()
             else:
                 status = athlete.get('status', {})
                 if isinstance(status, dict):
-                    s = status.get('type', 'active').lower()
+                    type_val = status.get('type', 'active')
+                    s = str(type_val).lower() if not isinstance(type_val, dict) else 'active'
                 else:
                     s = str(status).lower()
             if 'out' in s:
