@@ -1,157 +1,3 @@
-c = c.replace('LEG_MIN_BID = 0.60',           'LEG_MIN_BID = 0.58')
-c = c.replace('LEG_MAX_BID = 0.88',           'LEG_MAX_BID = 0.85')
-c = c.replace('MIN_COMBO_LEGS       = 4',     'MIN_COMBO_LEGS       = 6')
-c = c.replace('MAX_COMBO_LEGS       = 8',     'MAX_COMBO_LEGS       = 12')
-c = c.replace('MIN_COMBINED_CONF    = 0.02',  'MIN_COMBINED_CONF    = 0.005')
-c = c.replace('MIN_PAYOUT_MULT      = 5.0',   'MIN_PAYOUT_MULT      = 15.0')
-
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-# Quick test
-python3 -c "
-from combo_scanner import scan_all_props, build_best_combo
-from functools import reduce
-legs = scan_all_props()
-print(f'Total legs: {len(legs)}')
-candidate = build_best_combo(legs)
-if candidate:
-    print(f'Combo: {len(candidate.legs)} legs, {candidate.expected_payout:.1f}x, conf={candidate.combined_confidence:.3f}')
-    print(f'\$5 stake -> \${5*candidate.expected_payout:.0f}')
-    for l in candidate.legs:
-        print(f'  {l.implied_prob:.2f} conf={l.confidence:.2f} | {l.reasoning[:55]}')
-else:
-    print('No combo found')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 combo_scanner.py --live 2>&1 | grep -E "Combo|Dynamic|RFQ|Quote|Accept|No quote" | head -15
-python3 -c "
-from data.nba_stats import score_prop_leg, get_injury_status
-
-# Test all legs from the combo
-tickers = [
-    'KXNBAAST-26MAR29NYKOKC-NYKJBRUNSON11-2',
-    'KXNBAREB-26MAR29LACMIL-LACJCOLLINS20-4',
-    'KXNBA3PT-26MAR29NYKOKC-NYKPPRITCHARD11-4',
-    'KXNBAPTS-26MAR29MIAIND-MIAAWIGGINS22-10',
-    'KXNBAREB-26MAR29LACMIL-LACMTURNER33-4',
-    'KXNBA3PT-26MAR29LACMIL-LACKLEONARD2-2',
-    'KXNBASTL-26MAR29MIAIND-INDBMATHURIN9-1',
-    'KXNBA3PT-26MAR29NYKOKC-NYKJHART3-1',
-    'KXNBAAST-26MAR29HOUNOP-NOPDQUEEN0-2',
-    'KXNBASTL-26MAR29HOUNOP-HOUTEASON9-1',
-    'KXNBAAST-26MAR29LACMIL-LACDGARLAND10-2',
-    'KXNBAPTS-26MAR29OKCCLE-OKCCJSUGGS14-10',
-]
-for t in tickers:
-    r = score_prop_leg(t)
-    injured = r.get('injured', False)
-    status_note = ' ⚠️ INJURED' if injured else ''
-    print(f'conf={r[\"confidence\"]:.2f}{status_note} | {r[\"reason\"][:65]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-from data.nba_stats import _parse_ticker, _find_player, TEAM_CODE_MAP
-
-tests = [
-    'KXNBA3PT-26MAR29NYKOKC-NYKPPRITCHARD11-4',
-    'KXNBAREB-26MAR29LACMIL-LACMTURNER33-4',
-    'KXNBASTL-26MAR29MIAIND-INDBMATHURIN9-1',
-    'KXNBAPTS-26MAR29OKCCLE-OKCCJSUGGS14-10',
-]
-for t in tests:
-    parsed = _parse_ticker(t)
-    if parsed:
-        team, code = parsed
-        espn_team = TEAM_CODE_MAP.get(team, team)
-        espn_id, name = _find_player(espn_team, code)
-        print(f'{t[-20:]} → team={team} code={code} espn={espn_team} found={name}')
-    else:
-        print(f'{t[-20:]} → parse failed')
-" 2>&1 | grep -v DEBUG | grep -v WARNING
-python3 -c "
-import requests
-for team in ['NY', 'LAC', 'IND', 'OKC']:
-    r = requests.get(f'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{team}/roster', timeout=6)
-    athletes = r.json().get('athletes', [])
-    names = [a.get('lastName','').lower() for a in athletes]
-    print(f'{team}: {[n for n in names if any(x in n for x in [\"pritchard\",\"turner\",\"mathurin\",\"suggs\"])]}')
-"
-python3 -c "
-import requests
-r = requests.get('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/OKC/roster', timeout=6)
-data = r.json()
-print('Keys:', list(data.keys()))
-athletes = data.get('athletes', [])
-print(f'Athletes: {len(athletes)}')
-if athletes:
-    print('First:', athletes[0].get('fullName'))
-"
-python3 -c "
-import requests
-r = requests.get('https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/OKC/roster', timeout=6)
-athletes = r.json().get('athletes', [])
-for a in athletes:
-    print(a.get('lastName','').lower(), '|', a.get('fullName',''))
-"
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/data/nba_stats.py', 'r')
-c = f.read()
-f.close()
-
-old = '''    # Match player_code against last names
-    for athlete in roster:
-        last = athlete.get('lastName', '').lower()
-        full = athlete.get('fullName', '')
-
-        # Direct last name match
-        if player_code.endswith(last) or last in player_code:
-            return (athlete['id'], full)
-
-        # Partial match — player_code contains significant part of last name
-        if len(last) >= 4 and last[:4] in player_code:
-            return (athlete['id'], full)
-
-    return (None, None)'''
-
-new = '''    # Match player_code against last names
-    for athlete in roster:
-        last = athlete.get('lastName', '').lower().replace('-','').replace("'",'')
-        full = athlete.get('fullName', '')
-        code = player_code.replace('-','').replace("'",'')
-
-        # Direct last name match
-        if code.endswith(last) or last in code:
-            return (athlete['id'], full)
-
-        # Partial match — player_code contains significant part of last name
-        if len(last) >= 4 and last[:4] in code:
-            return (athlete['id'], full)
-
-        # Reverse partial — last name contains player code fragment
-        if len(code) >= 4 and code[:4] in last:
-            return (athlete['id'], full)
-
-    # Not found on primary team — search all NBA teams (handles trades)
-    all_teams = list(TEAM_CODE_MAP.values())
-    for team in all_teams:
-        if team == espn_team:
-            continue
-        try:
-            r2 = requests.get(f"{ESPN_BASE}/teams/{team}/roster", timeout=4)
-            r2.raise_for_status()
-            for athlete in r2.json().get('athletes', []):
-                last = athlete.get('lastName', '').lower().replace('-','').replace("'",'')
-                full = athlete.get('fullName', '')
-                code = player_code.replace('-','').replace("'",'')
-                if code.endswith(last) or last in code:
-                    log.debug(f"[NBAStats] Found {full} on {team} (traded from {espn_team})")
-                    return (athlete['id'], full)
-                if len(last) >= 4 and last[:4] in code:
-                    log.debug(f"[NBAStats] Found {full} on {team} (traded from {espn_team})")
-                    return (athlete['id'], full)
-        except Exception:
-            continue
-
     return (None, None)'''
 
 c = c.replace(old, new)
@@ -1998,3 +1844,157 @@ git add combo_scheduler.py && git commit -m "feat: auto cache warm on scheduler 
 screen -S combo -X quit
 screen -S combo bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py; exec bash'
 screen -ls && /root/kalshi-bot/bin/python3 -c "from data.persistent_cache import cache_stats; cache_stats()"
+cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py
+python3 telegram_bot.py
+soururce kalshi-bot/bin/activate
+source /root/kalshi-bot/bin/activate
+screen -ls
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
+c = f.read()
+f.close()
+
+# Fix stats to show v2 not v1
+c = c.replace(
+    'v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"',
+    'v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"  # v2 trades'
+)
+c = c.replace(
+    '"*V2 Bot (live)*"',
+    '"*V2 Bot*"'
+)
+
+# Fix /menu command — it's triggering positions instead of menu
+# The issue is cmd_menu sends wrong initial message
+old = '''async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 *Kalshi Bot v2*",
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard()
+    )'''
+
+new = '''async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 *Kalshi Bot v2* — What would you like to do?",
+        parse_mode="Markdown",
+        reply_markup=main_menu_keyboard()
+    )'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/bot.py', 'r')
+c = f.read()
+f.close()
+c = c.replace(
+    'if cycle % 10 == 0:',
+    'if cycle % 50 == 0:'
+)
+open('/root/kalshi-bot-v2/bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+screen -S tgbot -X quit
+screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
+systemctl restart kalshi-bot-v2
+git add -A && git commit -m "fix: menu command, cycle report frequency, stats v2" && git push origin master
+screen -ls | grep tgbot
+screen -r tgbot
+grep -A 15 "elif data == \"stats\":" /root/kalshi-bot-v2/telegram_bot.py | head -20
+cd /root/kalshi-bot-v2
+python3 << 'PYEOF'
+f = open('telegram_bot.py', 'r')
+c = f.read()
+f.close()
+
+old = '''            # V1 live stats
+            if os.path.exists(v1_file):
+                rows = list(csv.DictReader(open(v1_file)))
+                total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
+                lines.append(f"*V1 Bot (live)*")
+                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\n")'''
+
+new = '''            # V2 live stats
+            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"
+            if os.path.exists(v2_log):
+                rows = list(csv.DictReader(open(v2_log)))
+                total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
+                lines.append(f"*V2 Bot*")
+                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\\n")
+            else:
+                lines.append("*V2 Bot*\\nNo live trades yet\\n")'''
+
+c = c.replace(old, new)
+open('telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+screen tgbot -r
+screen -r
+screen -r tgbot
+grep "V2 Bot\|v2_log\|V1 Bot" /root/kalshi-bot-v2/telegram_bot.py | head -5
+cd /root/kalshi-bot-v2
+grep -n "V1 Bot\|v1_file\|V2 Bot\|v2_log" telegram_bot.py | head -10
+sed -n '220,240p' /root/kalshi-bot-v2/telegram_bot.py
+python3 << 'PYEOF'
+with open('/root/kalshi-bot-v2/telegram_bot.py', 'r') as f:
+    lines = f.readlines()
+
+new_lines = []
+skip_until = None
+i = 0
+while i < len(lines):
+    line = lines[i]
+    if '            v1_file    = "/root/trade_log.csv"' in line:
+        # Replace the whole V1 block
+        new_lines.append('            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"\n')
+        i += 1
+        continue
+    elif '            # V1 live stats' in line:
+        # Skip V1 block, replace with V2
+        new_lines.append('            # V2 live stats\n')
+        new_lines.append('            if os.path.exists(v2_log):\n')
+        new_lines.append('                rows = list(csv.DictReader(open(v2_log)))\n')
+        new_lines.append('                total_pnl = sum(float(r.get(\'pnl\',0) or 0) for r in rows)\n')
+        new_lines.append('                lines.append(f"*V2 Bot*")\n')
+        new_lines.append('                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\\n")\n')
+        new_lines.append('            else:\n')
+        new_lines.append('                lines.append("*V2 Bot*\\nNo live trades yet\\n")\n')
+        # Skip old V1 lines until V2 paper stats
+        i += 1
+        while i < len(lines) and '# V2 paper stats' not in lines[i]:
+            i += 1
+        continue
+    else:
+        new_lines.append(line)
+    i += 1
+
+with open('/root/kalshi-bot-v2/telegram_bot.py', 'w') as f:
+    f.writelines(new_lines)
+print("Done")
+PYEOF
+
+grep -n "V1 Bot\|V2 Bot\|v2_log" /root/kalshi-bot-v2/telegram_bot.py | head -5
+screen -r tgbot
+grep -n "positions" /root/kalshi-bot-v2/telegram_bot.py | grep -i "path\|file\|json"
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
+c = f.read()
+f.close()
+c = c.replace(
+    '"📋 No positions file found"',
+    '"📋 No open positions"'
+)
+open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 telegram_bot.py &
+git add -A && git commit -m "fix: stats v2, positions message, menu buttons" && git push origin master
+pkill -f telegram_bot.py
+sleep 2
+screen -S tgbot -X quit
+screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
