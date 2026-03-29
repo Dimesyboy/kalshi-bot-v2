@@ -10,6 +10,10 @@ import logging
 import re
 import requests
 from data.cache import TTLCache
+from data.persistent_cache import (
+    get_player_averages as _pc_get_avgs, set_player_averages as _pc_set_avgs,
+    get_player_id, set_player_id, get_roster, set_roster
+)
 
 log = logging.getLogger("kalshi_bot.data.nba_stats")
 
@@ -52,7 +56,7 @@ def get_player_averages(kalshi_ticker: str) -> dict:
     espn_team = TEAM_CODE_MAP.get(team_code, team_code)
 
     # Find ESPN athlete ID from roster
-    espn_id, full_name = _find_player(espn_team, last_name)
+    espn_id, full_name = _cached_find_player(espn_team, last_name)
     if not espn_id:
         log.debug(f"[NBAStats] Player not found: {last_name} on {espn_team}")
         return {}
@@ -87,6 +91,8 @@ def _find_player(espn_team: str, player_code: str) -> tuple:
     roster = stats_cache.get(cache_key)
 
     if roster is None:
+        roster = get_roster(espn_team, max_age_secs=86400)
+    if roster is None:
         try:
             r = requests.get(
                 f"{ESPN_BASE}/teams/{espn_team}/roster",
@@ -95,9 +101,25 @@ def _find_player(espn_team: str, player_code: str) -> tuple:
             r.raise_for_status()
             roster = r.json().get('athletes', [])
             stats_cache.set(cache_key, roster, ttl=3600)
+            set_roster(espn_team, roster)
         except Exception as e:
             log.warning(f"[NBAStats] Roster fetch failed {espn_team}: {e}")
             return (None, None)
+
+
+def _cached_find_player(espn_team: str, player_code: str) -> tuple:
+    """Wrapper around _find_player with persistent ID caching."""
+    key = f"{espn_team}_{player_code}"
+    espn_id, full_name = get_player_id(key)
+    if espn_id:
+        return espn_id, full_name
+    result = _find_player(espn_team, player_code)
+    if result is None:
+        return (None, None)
+    espn_id, full_name = result
+    if espn_id:
+        set_player_id(key, espn_id, full_name)
+    return espn_id, full_name
 
     # Match player_code against last names
     for athlete in roster:
@@ -186,6 +208,11 @@ def get_injury_status(espn_id: str, espn_team: str) -> str:
 
 def _fetch_averages(espn_id: str, full_name: str) -> dict:
     """Fetch current season per-game averages from ESPN."""
+    # Check persistent cache first (24h TTL)
+    cached = _pc_get_avgs(espn_id)
+    if cached:
+        log.debug(f"[NBAStats] Cache hit for {full_name}")
+        return cached
     try:
         r = requests.get(
             f"{ESPN_CORE}/seasons/2026/types/2/athletes/{espn_id}/statistics",
@@ -223,6 +250,7 @@ def _fetch_averages(espn_id: str, full_name: str) -> dict:
         log.debug(f"[NBAStats] {full_name}: "
                  f"pts={avgs['avg_points']} reb={avgs['avg_rebounds']} "
                  f"ast={avgs['avg_assists']}")
+        _pc_set_avgs(espn_id, avgs)
         return avgs
 
     except Exception as e:
@@ -299,33 +327,58 @@ def score_prop_leg(ticker: str) -> dict:
 
     ratio = avg_stat / threshold
 
-    # Confidence based on ratio
-    if ratio >= 2.0:
-        confidence = 0.88
-    elif ratio >= 1.7:
-        confidence = 0.82
-    elif ratio >= 1.5:
-        confidence = 0.76
-    elif ratio >= 1.3:
-        confidence = 0.70
-    else:
-        confidence = 0.0  # Too close — skip
+    # ── Hit rate from last 10 games (primary signal) ──────────────────
+    hit_rate   = 0.0
+    recent_avg = 0.0
+    espn_id2   = avgs.get("espn_id", "")
+    stat_key   = {"KXNBAPTS":"pts","KXNBAREB":"reb","KXNBAAST":"ast",
+                  "KXNBASTL":"stl","KXNBABLK":"blk","KXNBA3PT":"threes"}.get(series,"pts")
+    if espn_id2:
+        try:
+            from data.player_stats import get_hit_rate as _hit_rate, get_recent_avg as _recent_avg
+            hit_rate   = _hit_rate(espn_id2, stat_key, threshold, n=10)
+            recent_avg = _recent_avg(espn_id2, stat_key, n=5)
+        except Exception:
+            pass
 
-    # Apply questionable penalty
+    # ── Confidence model ───────────────────────────────────────────────
+    # Use hit rate as primary signal if we have it, ratio as fallback
+    if hit_rate > 0:
+        # Blend hit rate (70%) with ratio-based confidence (30%)
+        if ratio >= 2.0:   ratio_conf = 0.88
+        elif ratio >= 1.7: ratio_conf = 0.82
+        elif ratio >= 1.5: ratio_conf = 0.76
+        elif ratio >= 1.3: ratio_conf = 0.70
+        else:              ratio_conf = 0.60
+
+        confidence = round(hit_rate * 0.70 + ratio_conf * 0.30, 3)
+
+        # Minimum threshold — don't include legs below 65%
+        if confidence < 0.65:
+            confidence = 0.0
+    else:
+        # Fallback to ratio only
+        if ratio >= 2.0:   confidence = 0.88
+        elif ratio >= 1.7: confidence = 0.82
+        elif ratio >= 1.5: confidence = 0.76
+        elif ratio >= 1.3: confidence = 0.70
+        else:              confidence = 0.0
+
+    # ── Injury penalty ─────────────────────────────────────────────────
     injury_note = ""
     if confidence > 0:
         parsed2 = _parse_ticker(ticker)
-        espn_id2 = avgs.get("espn_id", "")
         if parsed2 and espn_id2:
             team_code2 = parsed2[0]
             espn_team2 = TEAM_CODE_MAP.get(team_code2, team_code2)
             status2    = get_injury_status(espn_id2, espn_team2)
             if status2 == "questionable":
-                confidence = round(max(0, confidence - 0.10), 2)
+                confidence = round(max(0, confidence - 0.08), 3)
                 injury_note = " [questionable]"
 
+    hit_str = f" hr={hit_rate:.0%}" if hit_rate > 0 else ""
     reason = (f"{avgs['player_name']} avg {avg_stat:.1f} vs threshold {threshold} "
-              f"(ratio={ratio:.2f}) → conf={confidence:.2f}{injury_note}")
+              f"(ratio={ratio:.2f}{hit_str}) → conf={confidence:.2f}{injury_note}")
 
     return {
         'confidence':   confidence,
