@@ -220,10 +220,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
 
     elif data == "highconf":
-        await query.edit_message_text("🔍 Finding monster combo...")
+        await query.edit_message_text("💪 Building monster combo... (~10s)")
         try:
+            import asyncio
             from combo_scanner import scan_all_props, build_highconf_combo
-            legs      = scan_all_props()
+            legs      = await asyncio.get_event_loop().run_in_executor(None, scan_all_props)
             candidate = build_highconf_combo(legs)
             if not candidate:
                 await query.edit_message_text(

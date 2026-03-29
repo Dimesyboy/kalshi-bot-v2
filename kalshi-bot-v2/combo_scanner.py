@@ -379,6 +379,13 @@ def submit_rfq(candidate: ComboCandidate,
     ev        = _evaluate_quote(candidate, yes_bid, stake_dollars)
     log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
 
+    # Minimum payout check — reject if less than 10x
+    min_payout = 10.0
+    actual_payout = stake_dollars / yes_bid if yes_bid > 0 else 0
+    if actual_payout < min_payout:
+        log.info(f"[Combo] Quote rejected — payout {actual_payout:.1f}x below {min_payout}x minimum")
+        return None
+
     if ev <= 0:
         log.info(f"[Combo] Quote rejected — negative EV")
         return None
