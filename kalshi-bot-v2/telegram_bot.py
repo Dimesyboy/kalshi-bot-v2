@@ -125,7 +125,8 @@ def format_parlay(candidate, legs_with_reasons: list) -> str:
             player    = leg.reasoning.split(' avg')[0] if ' avg' in leg.reasoning else ''
             avg       = leg.reasoning.split('avg ')[1].split(' vs')[0] if 'avg' in leg.reasoning else ''
             price     = int(leg.implied_prob * 100)
-            lines.append(f"• {player} {threshold}+ {stat} _{price}¢_ — avg {avg}")
+            edge_str = f" +{int(getattr(leg, 'edge', 0)*100)}¢ edge" if getattr(leg, 'edge', 0) > 0 else ""
+            lines.append(f"• {player} {threshold}+ {stat} _{price}¢_{edge_str} — avg {avg}")
             if reason:
                 lines.append(f"  _{reason}_")
         lines.append("")
@@ -190,6 +191,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             from combo_scanner import scan_all_props, build_best_combo
             legs      = scan_all_props()
             candidate = build_best_combo(legs)
+            # Attach edge info to legs for display
+            if candidate:
+                for leg in candidate.legs:
+                    leg.edge = round(leg.confidence - leg.implied_prob, 3)
             if not candidate:
                 await query.edit_message_text(
                     "❌ No qualifying combo right now.\nTry closer to game time.",

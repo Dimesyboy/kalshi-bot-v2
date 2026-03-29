@@ -1,6 +1,3 @@
-    # RFQ
-    rfq_path = '/trade-api/v2/communications/rfqs'
-    rfq_body = {
         'market_ticker':         market_ticker,
         'mve_collection_ticker': 'KXMVESPORTSMULTIGAMEEXTENDED-R',
         'target_cost_dollars':   '1.00',
@@ -1998,3 +1995,6 @@ print(f'Giannis status: {result}')
 " 2>&1 | grep -v DEBUG
 cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py
 cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scanner.py --live
+python telegram_bot.py
+python3 telegram_bot.py
+screen -S tgbot -X quit

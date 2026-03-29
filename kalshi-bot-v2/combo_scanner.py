@@ -436,9 +436,30 @@ MIN_PAYOUT_MULT      = 15.0    # Minimum expected payout multiplier
 
 def scan_all_props() -> list[ComboLeg]:
     """
-    Scan all open NBA prop markets across all games.
-    Score each leg, dedupe by player, return sorted by payout contribution.
+    Scan all open NBA prop markets using edge-based selection.
+    Finds legs where our model disagrees with market price (positive edge).
+    Edge = model_confidence - market_price
     """
+    from data.prop_scanner import scan_edges
+    edge_legs = scan_edges()
+
+    combo_legs = []
+    for leg in edge_legs:
+        combo_legs.append(ComboLeg(
+            ticker            = leg['ticker'],
+            collection_ticker = 'KXMVESPORTSMULTIGAMEEXTENDED-R',
+            confidence        = leg['model_conf'],
+            implied_prob      = leg['market_price'],
+            is_yes_only       = True,
+            reasoning         = leg['reasoning'],
+        ))
+
+    log.info(f"[Combo] {len(combo_legs)} edge-qualified legs")
+    return combo_legs
+
+
+def scan_all_props_legacy() -> list[ComboLeg]:
+    """Legacy price-sorted scanner — kept for reference."""
     import re
     all_legs = []
     seen_players = {}  # player_key → best leg
