@@ -101,16 +101,42 @@ def _find_player(espn_team: str, player_code: str) -> tuple:
 
     # Match player_code against last names
     for athlete in roster:
-        last = athlete.get('lastName', '').lower()
+        last = athlete.get('lastName', '').lower().replace('-','').replace("'",'')
         full = athlete.get('fullName', '')
+        code = player_code.replace('-','').replace("'",'')
 
         # Direct last name match
-        if player_code.endswith(last) or last in player_code:
+        if code.endswith(last) or last in code:
             return (athlete['id'], full)
 
         # Partial match — player_code contains significant part of last name
-        if len(last) >= 4 and last[:4] in player_code:
+        if len(last) >= 4 and last[:4] in code:
             return (athlete['id'], full)
+
+        # Reverse partial — last name contains player code fragment
+        if len(code) >= 4 and code[:4] in last:
+            return (athlete['id'], full)
+
+    # Not found on primary team — search all NBA teams (handles trades)
+    all_teams = list(TEAM_CODE_MAP.values())
+    for team in all_teams:
+        if team == espn_team:
+            continue
+        try:
+            r2 = requests.get(f"{ESPN_BASE}/teams/{team}/roster", timeout=4)
+            r2.raise_for_status()
+            for athlete in r2.json().get('athletes', []):
+                last = athlete.get('lastName', '').lower().replace('-','').replace("'",'')
+                full = athlete.get('fullName', '')
+                code = player_code.replace('-','').replace("'",'')
+                if code.endswith(last) or last in code:
+                    log.debug(f"[NBAStats] Found {full} on {team} (traded from {espn_team})")
+                    return (athlete['id'], full)
+                if len(last) >= 4 and last[:4] in code:
+                    log.debug(f"[NBAStats] Found {full} on {team} (traded from {espn_team})")
+                    return (athlete['id'], full)
+        except Exception:
+            continue
 
     return (None, None)
 

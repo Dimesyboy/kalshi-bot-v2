@@ -47,7 +47,7 @@ log = logging.getLogger("kalshi_bot.combo")
 MVE_NBA_SERIES  = "KXMVENBASINGLEGAME"
 MVE_MLB_SERIES  = "KXMVEMLBSINGLEGAME"
 
-MIN_LEG_CONFIDENCE    = 0.68   # Each leg must clear this
+MIN_LEG_CONFIDENCE    = 0.65   # Each leg must clear this
 MIN_COMBINED_CONF     = 0.15   # Floor for full parlay (combined probability)
 MAX_COMBO_STAKE       = 5.00   # dollars — fixed until win rate proven
 MIN_LEGS              = 4      # Minimum legs for a valid combo
@@ -424,14 +424,14 @@ def _evaluate_quote(candidate: ComboCandidate,
 PROP_SERIES = ['KXNBAPTS', 'KXNBAREB', 'KXNBAAST', 'KXNBA3PT', 'KXNBASTL']
 
 # Min/max yes_bid for combo legs
-LEG_MIN_BID = 0.60
-LEG_MAX_BID = 0.88   # Cap at 88% — above this barely adds payout
+LEG_MIN_BID = 0.58
+LEG_MAX_BID = 0.85   # Cap at 88% — above this barely adds payout
 
 # Combo sizing
-MIN_COMBO_LEGS       = 4
-MAX_COMBO_LEGS       = 8
-MIN_COMBINED_CONF    = 0.02   # 2% floor
-MIN_PAYOUT_MULT      = 5.0    # Minimum expected payout multiplier
+MIN_COMBO_LEGS       = 6
+MAX_COMBO_LEGS       = 12
+MIN_COMBINED_CONF    = 0.005   # 2% floor
+MIN_PAYOUT_MULT      = 15.0    # Minimum expected payout multiplier
 
 
 def scan_all_props() -> list[ComboLeg]:
