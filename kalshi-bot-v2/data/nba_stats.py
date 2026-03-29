@@ -106,21 +106,6 @@ def _find_player(espn_team: str, player_code: str) -> tuple:
             log.warning(f"[NBAStats] Roster fetch failed {espn_team}: {e}")
             return (None, None)
 
-
-def _cached_find_player(espn_team: str, player_code: str) -> tuple:
-    """Wrapper around _find_player with persistent ID caching."""
-    key = f"{espn_team}_{player_code}"
-    espn_id, full_name = get_player_id(key)
-    if espn_id:
-        return espn_id, full_name
-    result = _find_player(espn_team, player_code)
-    if result is None:
-        return (None, None)
-    espn_id, full_name = result
-    if espn_id:
-        set_player_id(key, espn_id, full_name)
-    return espn_id, full_name
-
     # Match player_code against last names
     for athlete in roster:
         last = athlete.get('lastName', '').lower().replace('-','').replace("'",'')
@@ -137,6 +122,15 @@ def _cached_find_player(espn_team: str, player_code: str) -> tuple:
 
         # Reverse partial — last name contains player code fragment
         if len(code) >= 4 and code[:4] in last:
+            return (athlete['id'], full)
+
+        # Handle double-letter codes e.g. nclaxtonn -> claxton
+        stripped = code.rstrip(code[-1]) if code else code
+        if len(stripped) >= 4 and (stripped in last or last in stripped):
+            return (athlete['id'], full)
+
+        # Handle missing vowels / truncation e.g. dderoza -> derozan
+        if len(code) >= 5 and (code[1:] in last or last in code[1:]):
             return (athlete['id'], full)
 
     # Not found on primary team — search all NBA teams (handles trades)
@@ -161,6 +155,21 @@ def _cached_find_player(espn_team: str, player_code: str) -> tuple:
             continue
 
     return (None, None)
+
+
+def _cached_find_player(espn_team: str, player_code: str) -> tuple:
+    """Wrapper around _find_player with persistent ID caching."""
+    key = f"{espn_team}_{player_code}"
+    espn_id, full_name = get_player_id(key)
+    if espn_id:
+        return espn_id, full_name
+    result = _find_player(espn_team, player_code)
+    if result is None:
+        return (None, None)
+    espn_id, full_name = result
+    if espn_id:
+        set_player_id(key, espn_id, full_name)
+    return espn_id, full_name
 
 
 def get_injury_status(espn_id: str, espn_team: str) -> str:
