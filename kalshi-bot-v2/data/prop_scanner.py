@@ -123,6 +123,42 @@ def scan_edges() -> list[dict]:
     return results
 
 
+def apply_price_monitoring(legs: list, window_secs: int = 300) -> list:
+    """
+    Monitor prices and adjust confidence scores.
+    Removes or penalizes legs where price is falling significantly.
+    """
+    from data.price_monitor import get_price_adjustments
+    from combo_scanner import ComboLeg
+
+    # Convert dicts to ComboLeg-like objects for price monitor
+    class _Leg:
+        def __init__(self, d):
+            self.ticker    = d['ticker']
+            self.reasoning = d['reasoning']
+
+    leg_objs    = [_Leg(l) for l in legs]
+    adjustments = get_price_adjustments(leg_objs, window_secs)
+
+    adjusted = []
+    for leg in legs:
+        adj      = adjustments.get(leg['ticker'], 0.0)
+        new_conf = leg['model_conf'] + adj
+
+        if new_conf <= 0 or adj <= -0.99:
+            log.info(f"[PropScanner] Dropping leg after price monitor: {leg['ticker'][-25:]}")
+            continue
+
+        leg = dict(leg)
+        leg['model_conf'] = round(max(0, new_conf), 3)
+        leg['edge']       = round(leg['model_conf'] - leg['market_price'], 3)
+        leg['price_adj']  = adj
+        adjusted.append(leg)
+
+    log.info(f"[PropScanner] Price monitor: {len(legs)} -> {len(adjusted)} legs")
+    return adjusted
+
+
 def build_edge_combo(legs: list[dict], max_legs: int = 12,
                      min_payout: float = 20.0) -> list[dict]:
     """

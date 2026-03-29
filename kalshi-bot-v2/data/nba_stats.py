@@ -205,6 +205,12 @@ def get_injury_status(espn_id: str, espn_team: str) -> str:
                     s = str(type_val).lower() if not isinstance(type_val, dict) else 'active'
                 else:
                     s = str(status).lower()
+            # Also check deactivated flag
+            if athlete.get('deactivated', False):
+                s = 'out'
+            # Check active flag
+            if not athlete.get('active', True):
+                s = 'out' 
             if 'out' in s:
                 return 'out'
             if 'doubtful' in s:

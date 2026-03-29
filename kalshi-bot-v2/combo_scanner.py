@@ -565,6 +565,30 @@ def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
     candidates = []
     legs       = scan_all_props()
 
+    # ── Price monitoring (5 min window) ───────────────────────────────
+    if not dry_run and legs:
+        log.info("[Combo] Running price monitor (5 min)...")
+        from data.prop_scanner import apply_price_monitoring
+        # Convert ComboLegs to dicts for price monitor
+        leg_dicts = [{
+            'ticker':     l.ticker,
+            'model_conf': l.confidence,
+            'market_price': l.implied_prob,
+            'edge':       l.confidence - l.implied_prob,
+            'reasoning':  l.reasoning,
+        } for l in legs]
+        monitored = apply_price_monitoring(leg_dicts, window_secs=300)
+        # Rebuild ComboLegs with adjusted confidence
+        legs = [ComboLeg(
+            ticker            = d['ticker'],
+            collection_ticker = 'KXMVESPORTSMULTIGAMEEXTENDED-R',
+            confidence        = d['model_conf'],
+            implied_prob      = d['market_price'],
+            is_yes_only       = True,
+            reasoning         = d['reasoning'],
+        ) for d in monitored if d['edge'] >= 0.02]
+        log.info(f"[Combo] After price monitor: {len(legs)} legs remain")
+
     # ── MOONSHOT ───────────────────────────────────────────────────────
     moonshot = build_best_combo(legs)
     if moonshot:
