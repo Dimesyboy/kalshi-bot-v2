@@ -144,7 +144,8 @@ def main_menu_keyboard():
          InlineKeyboardButton("💵 Balance",     callback_data="balance")],
         [InlineKeyboardButton("📋 Positions",   callback_data="positions"),
          InlineKeyboardButton("⚙️ Settings",    callback_data="settings")],
-        [InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],
+        [InlineKeyboardButton("🔬 Model Audit",  callback_data="audit"),
+         InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],
     ])
 
 def settings_keyboard():
@@ -244,6 +245,23 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             await query.edit_message_text(f"❌ Error: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
+
+    elif data == "audit":
+        await query.edit_message_text("🔬 Running model audit...")
+        try:
+            from data.model_audit import run_audit, format_audit_telegram
+            report = run_audit(days=7)
+            msg    = format_audit_telegram(report)
+            await query.edit_message_text(
+                msg, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Refresh", callback_data="audit"),
+                    InlineKeyboardButton("🔙 Menu",    callback_data="menu")
+                ]])
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Audit error: {str(e)[:100]}",
                 reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
 
     elif data == "stats":

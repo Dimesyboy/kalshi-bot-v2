@@ -81,9 +81,32 @@ def warm_cache():
         log.warning(f"Cache warm failed: {e}")
 
 
+def run_nightly_audit():
+    """Run model audit and send results to Telegram."""
+    try:
+        from data.model_audit import run_audit, format_audit_telegram
+        from telegram_bot import send_telegram
+        log.info("Running nightly model audit...")
+        report = run_audit(days=7)
+        msg    = format_audit_telegram(report)
+        # Send via Telegram
+        from core.config import config
+        import requests
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+        requests.post(url, json={
+            "chat_id":    config.TELEGRAM_CHAT_ID,
+            "text":       msg,
+            "parse_mode": "Markdown"
+        }, timeout=8)
+        log.info("Nightly audit sent to Telegram")
+    except Exception as e:
+        log.warning(f"Nightly audit failed: {e}")
+
+
 def main():
     log.info("Combo Scheduler starting")
     warm_cache()
+    run_nightly_audit()
     log.info("Fetching today's NBA schedule...")
 
     tip_times = get_todays_tip_times()
