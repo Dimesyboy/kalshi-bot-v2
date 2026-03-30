@@ -1,4 +1,4 @@
-import signal
+import signal as _signal
 #!/usr/bin/env python3
 """
 bot.py
@@ -48,6 +48,7 @@ from data.tennis import get_live_matches
 from data.cache import nba_cache, mlb_cache, tennis_cache
 from strategies.tennis import TennisFade
 from strategies.nba import NBAFade, NBAMomentumReversal
+from core.reconciler import reconciler
 from strategies.prop_nba import NBAPropStrategy
 from strategies.mlb import MLBFade
 from strategies.cross_sport import ClosingLine
@@ -313,8 +314,8 @@ def run_bot():
         watcher.stop()
         sys.exit(0)
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    _signal.signal(_signal.SIGTERM, _shutdown)
+    _signal.signal(_signal.SIGINT, _shutdown)
 
     # ── Main cycle ─────────────────────────────────────────────────────────
     cycle = 0
@@ -344,15 +345,14 @@ def run_bot():
             for m in markets:
                 price_history.update(m.ticker, int(m.yes_bid * 100))
 
-            # Count open positions
-            open_count   = len(open_positions)
-            pending_count= order_mgr.get_pending_count()
+            # Use reconciler as source of truth for position counts
             signals_found= 0
             trades_placed= 0
+            total_exposure = reconciler.get_total_exposure()
 
             # Skip trading if at position limit
-            if open_count + pending_count >= config.MAX_OPEN_POSITIONS:
-                log.info(f"[Bot] At position limit ({open_count} open, {pending_count} pending)")
+            if total_exposure >= config.MAX_OPEN_POSITIONS:
+                log.info(f"[Bot] At position limit ({total_exposure} exposure)")
             else:
                 context = {"balance": balance}
 
@@ -381,8 +381,7 @@ def run_bot():
 
                         # Place order
                         if config.DRY_RUN:
-                            log.info(f"[DRY RUN] Would place: {trade_trade_signal.market_ticker} "
-                                    f"{trade_trade_signal.side.value.upper()} @ {trade_trade_signal.price}c")
+                            log.info(f"[DRY RUN] Would place: {trade_signal.market_ticker} {str(trade_signal.side).upper()} @ {trade_signal.price}c")
                             continue
 
                         if balance < trade_signal.price * trade_signal.contracts / 100.0:
@@ -407,9 +406,10 @@ def run_bot():
                             )
                             bot_orders.add(order_id)
                             save_bot_orders(bot_orders)
+                            reconciler.register_bot_order(order_id, client_order_id)
 
                             order_mgr.add_pending(
-                                signal      = signal,
+                                signal      = trade_signal,
                                 order_id    = order_id,
                                 contracts   = trade_signal.contracts,
                                 entry_price = trade_signal.price,
@@ -421,7 +421,7 @@ def run_bot():
                             )
                             _atomic_write(COOLDOWN_FILE, signal_cooldown)
 
-                            alert_trade(signal)
+                            alert_trade(trade_signal)
                             trades_placed += 1
 
                         break  # One strategy per market per cycle

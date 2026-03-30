@@ -97,7 +97,7 @@ class OrderManager:
             "order_id":     order_id,
             "ticker":       signal.market_ticker,
             "event_ticker": signal.event_ticker,
-            "side":         signal.side,
+            "side":         str(signal.side).split(".")[-1].lower(),
             "strategy":     signal.strategy,
             "reason":       signal.reason,
             "confidence":   signal.confidence,
@@ -105,7 +105,7 @@ class OrderManager:
             "contracts":    contracts,
             "filled":       0,
             "entry_fee":    entry_fee,
-            "state":        OrderState.PENDING,
+            "state":        "pending",
             "placed_time":  now,
             "close_time":   getattr(signal, "close_time", None),
             "market_status": getattr(signal, "market_status", "active"),
@@ -115,7 +115,7 @@ class OrderManager:
             self._pending[order_id] = pending
         self._save_pending()
         log.info(f"[OrderManager] PENDING {signal.market_ticker} "
-                 f"{signal.side.upper()} @ {entry_price}c x{contracts} "
+                 f"{str(signal.side).split(".")[-1].upper()} @ {entry_price}c x{contracts} "
                  f"order={order_id[:8]}")
 
     def poll_pending(self, client):
@@ -276,7 +276,7 @@ class OrderManager:
             # Update pending with current fill count
             if order_id in self._pending:
                 self._pending[order_id]["filled"] = filled
-                self._pending[order_id]["state"]  = OrderState.PARTIAL
+                self._pending[order_id]["state"]  = "partial"
 
         self._save_pos(self._positions)
         self._save_pending()

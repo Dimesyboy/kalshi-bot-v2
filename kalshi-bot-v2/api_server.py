@@ -47,8 +47,32 @@ def get_balance(x_api_key: str = Header(...)):
     verify_key(x_api_key)
     try:
         from core.kalshi_client import get_balance
+        from core.reconciler import reconciler
         bal = get_balance()
-        return {"balance": round(bal, 2)}
+        pnl = reconciler.get_pnl()
+        return {
+            "balance":     round(bal, 2),
+            "bot_pnl":     pnl["bot_pnl"],
+            "manual_pnl":  pnl["manual_pnl"],
+            "total_pnl":   pnl["total_pnl"],
+            "last_sync":   pnl["last_sync"],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/positions")
+def get_positions(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        from core.reconciler import reconciler
+        return {
+            "all":         reconciler.get_positions(),
+            "bot":         reconciler.get_bot_positions(),
+            "manual":      reconciler.get_manual_positions(),
+            "pnl":         reconciler.get_pnl(),
+            "exposure":    reconciler.get_total_exposure(),
+            "resting":     reconciler.get_resting_count(),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -1,1585 +1,3 @@
-            player = l.reasoning.split(' avg')[0]
-            price  = int(l.implied_prob * 100)
-            hr     = l.reasoning.split('hr=')[1].split(')')[0] if 'hr=' in l.reasoning else '?'
-            print(f'  {player} {thr}+ {stat} @ {price}c  HR:{hr} conf:{l.confidence:.2f}')
-        print()
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-cd /root/kalshi-bot-v2 && python3 << 'PYEOF'
-f = open('telegram_bot.py', 'r')
-c = f.read()
-f.close()
-
-old = '''        [InlineKeyboardButton("🎯 Best Parlay", callback_data="parlay"),
-         InlineKeyboardButton("📊 Stats",       callback_data="stats")],'''
-
-new = '''        [InlineKeyboardButton("🎯 Moonshot",    callback_data="parlay"),
-         InlineKeyboardButton("💪 Monster",     callback_data="highconf")],
-        [InlineKeyboardButton("📊 Stats",       callback_data="stats"),
-         InlineKeyboardButton("💵 Balance",     callback_data="balance")],'''
-
-c = c.replace(old, new)
-
-# Remove balance from second row since it moved up
-old2 = '''        [InlineKeyboardButton("💵 Balance",     callback_data="balance"),
-         InlineKeyboardButton("📋 Positions",   callback_data="positions")],'''
-new2 = '''        [InlineKeyboardButton("📋 Positions",   callback_data="positions"),
-         InlineKeyboardButton("⚙️ Settings",    callback_data="settings")],'''
-c = c.replace(old2, new2)
-
-old3 = '''        [InlineKeyboardButton("⚙️ Settings",    callback_data="settings"),
-         InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],'''
-new3 = '''        [InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],'''
-c = c.replace(old3, new3)
-
-# Add highconf handler
-old4 = '''    elif data == "stats":'''
-new4 = '''    elif data == "highconf":
-        await query.edit_message_text("🔍 Finding monster combo...")
-        try:
-            from combo_scanner import scan_all_props, build_highconf_combo
-            legs      = scan_all_props()
-            candidate = build_highconf_combo(legs)
-            if not candidate:
-                await query.edit_message_text(
-                    "❌ No high confidence combo right now.",
-                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
-                )
-                return
-            await query.edit_message_text(f"✅ Found {len(candidate.legs)}-leg monster — analysing...")
-            legs_with_reasons = [(leg, explain_leg(leg)) for leg in candidate.legs]
-            msg = format_parlay(candidate, legs_with_reasons)
-            await query.edit_message_text(
-                msg, parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup([[
-                    InlineKeyboardButton("🔄 Rescan", callback_data="highconf"),
-                    InlineKeyboardButton("🔙 Menu",   callback_data="menu")
-                ]])
-            )
-        except Exception as e:
-            await query.edit_message_text(f"❌ Error: {str(e)[:100]}",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
-
-    elif data == "stats":'''
-
-c = c.replace(old4, new4)
-open('telegram_bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-git add -A && git commit -m "feat: monster combo button on TG, dual combo modes live" && git push origin master
-screen -S tgbot -X quit
-screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
-screen -r tgbot
-cd /root/kalshi-bot-v2
-python3 << 'PYEOF'
-f = open('bot.py', 'r')
-c = f.read()
-f.close()
-# Disable cycle reports entirely
-c = c.replace(
-    'if cycle % 50 == 0:',
-    'if False and cycle % 50 == 0:  # disabled'
-)
-open('bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-systemctl restart kalshi-bot-v2
-systemctl restart kalshi-bot-v2 && sleep 3 && systemctl status kalshi-bot-v2 | grep Active
-cd /root/kalshi-bot-v2 && python3 << 'PYEOF'
-f = open('bot.py', 'r')
-c = f.read()
-f.close()
-c = c.replace(
-    'send_startup(balance',
-    '# send_startup(balance'
-)
-open('bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-git add -A && git commit -m "fix: disable cycle reports and startup spam in Telegram" && git push origin master
-systemctl restart kalshi-bot-v2
-cd /root/kalshi-bot-v2 && python3 << 'PYEOF'
-f = open('telegram_bot.py', 'r')
-c = f.read()
-f.close()
-
-# Add timeout to scan calls
-old = '''    elif data == "parlay":
-        await query.edit_message_text("🔍 Scanning props... give me a sec")
-        try:
-            from combo_scanner import scan_all_props, build_best_combo
-            legs      = scan_all_props()
-            candidate = build_best_combo(legs)'''
-
-new = '''    elif data == "parlay":
-        await query.edit_message_text("🔍 Scanning props... (~10s)")
-        try:
-            import asyncio
-            from combo_scanner import scan_all_props, build_best_combo
-            legs      = await asyncio.get_event_loop().run_in_executor(None, scan_all_props)
-            candidate = build_best_combo(legs)'''
-
-c = c.replace(old, new)
-
-old2 = '''    elif data == "highconf":
-        await query.edit_message_text("🔍 Finding monster combo...")
-        try:
-            from combo_scanner import scan_all_props, build_highconf_combo
-            legs      = scan_all_props()
-            candidate = build_highconf_combo(legs)'''
-
-new2 = '''    elif data == "highconf":
-        await query.edit_message_text("💪 Building monster combo... (~10s)")
-        try:
-            import asyncio
-            from combo_scanner import scan_all_props, build_highconf_combo
-            legs      = await asyncio.get_event_loop().run_in_executor(None, scan_all_props)
-            candidate = build_highconf_combo(legs)'''
-
-c = c.replace(old2, new2)
-open('telegram_bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-screen -S tgbot -X quit
-screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 -c "
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
-from combo_scanner import scan_all_props, build_highconf_combo, submit_rfq, _log_combo_trade
-
-legs = scan_all_props()
-candidate = build_highconf_combo(legs)
-
-if candidate:
-    print(f'Monster: {len(candidate.legs)} legs | {candidate.expected_payout:.1f}x | \$5->\${5*candidate.expected_payout:.0f}')
-    quote = submit_rfq(candidate)
-    if quote:
-        print(f'EXECUTED — quote: {quote.get(\"yes_bid_dollars\")}')
-        _log_combo_trade(candidate, quote, mode='highconf')
-    else:
-        print('No quote received')
-else:
-    print('No monster combo found')
-" 2>&1 | grep -v DEBUG | grep -v NBAStats | grep -v WARNING
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-c = c.replace('QUOTE_TIMEOUT_SECS = 5', 'QUOTE_TIMEOUT_SECS = 15')
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-# Check which legs are from which games
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-import re
-
-legs = scan_all_props()
-hc = build_highconf_combo(legs)
-games = {}
-for l in hc.legs:
-    m = re.search(r'\d{2}[A-Z]{3}\d{2}([A-Z]{6})', l.ticker.split('-')[1])
-    code = m.group(1) if m else '??????'
-    games.setdefault(code, []).append(l.ticker)
-
-for game, tickers in games.items():
-    print(f'{game[:3]} vs {game[3:6]}: {len(tickers)} legs')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-import logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
-from combo_scanner import scan_all_props, build_highconf_combo, submit_rfq, _log_combo_trade, ComboCandidate
-import re
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-# Filter out GSW/DEN legs (too early for quotes)
-filtered = [l for l in hc.legs if 'GSDEN' not in l.ticker and 'DENGS' not in l.ticker]
-print(f'Legs after removing GSW/DEN: {len(filtered)}')
-
-candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', filtered)
-print(f'Payout: {candidate.expected_payout:.1f}x | \$5->\${5*candidate.expected_payout:.0f}')
-
-quote = submit_rfq(candidate)
-if quote:
-    print(f'EXECUTED — bid={quote.get(\"yes_bid_dollars\")}')
-    _log_combo_trade(candidate, quote, mode='highconf')
-else:
-    print('No quote received')
-" 2>&1 | grep -v DEBUG | grep -v NBAStats | grep -v WARNING
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-from core.kalshi_client import _signed_get
-import re
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-print('Checking live market prices for each leg:')
-print()
-quotable = []
-for l in hc.legs:
-    try:
-        data    = _signed_get(f'/trade-api/v2/markets/{l.ticker}')
-        market  = data.get('market', {})
-        yes_bid = float(market.get('yes_bid_dollars', 0) or 0)
-        yes_ask = float(market.get('yes_ask_dollars', 0) or 0)
-        volume  = float(market.get('volume_fp', 0) or 0)
-        spread  = yes_ask - yes_bid if yes_ask > 0 else 1.0
-        player  = l.reasoning.split(' avg')[0]
-        thr     = l.ticker.split('-')[-1]
-        series  = l.ticker.split('-')[0]
-        stat    = {'KXNBAPTS':'pts','KXNBAREB':'reb','KXNBAAST':'ast','KXNBA3PT':'3s','KXNBASTL':'stl','KXNBABLK':'blk'}.get(series,'?')
-        active  = '✅' if yes_bid > 0 and spread < 0.15 else '⚠️ ' if yes_bid > 0 else '❌'
-        print(f'{active} {player} {thr}+ {stat} | bid={yes_bid:.2f} ask={yes_ask:.2f} vol={volume:.0f}')
-        if yes_bid > 0:
-            quotable.append(l)
-    except Exception as e:
-        print(f'❌ {l.ticker[-20:]}: {e}')
-
-print(f'Quotable legs: {len(quotable)}/{len(hc.legs)}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-import kalshi_python, uuid
-from core.kalshi_client import get_client
-from combo_scanner import scan_all_props, build_highconf_combo
-from core.kalshi_client import _signed_get
-import requests, base64, time, re
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
-from core.config import config
-
-# Build the combo market
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-with open(config.KALSHI_KEY_FILE, 'rb') as f:
-    private_key = serialization.load_pem_private_key(f.read(), password=None)
-
-def pss_headers(method, path):
-    ts  = str(int(time.time() * 1000))
-    sig = private_key.sign((ts+method+path).encode(),
-          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
-          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
-    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
-            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
-            'KALSHI-ACCESS-TIMESTAMP': ts, 'Content-Type': 'application/json'}
-
-def event_ticker(t):
-    m = re.match(r'(KXNBA[A-Z0-9]+-\d{2}[A-Z]{3}\d{2}[A-Z]+)', t)
-    return m.group(1) if m else t.rsplit('-', 2)[0]
-
-# Create dynamic market
-selected = [{'market_ticker': l.ticker, 'event_ticker': event_ticker(l.ticker), 'side': 'yes'} for l in hc.legs]
-cp = '/trade-api/v2/multivariate_event_collections/KXMVESPORTSMULTIGAMEEXTENDED-R'
-rc = requests.post(f'https://api.elections.kalshi.com{cp}',
-     headers=pss_headers('POST', cp),
-     json={'selected_markets': selected, 'with_market_payload': True}, timeout=8)
-market_ticker = rc.json().get('market_ticker')
-print(f'Market: {market_ticker}')
-
-# Get current ask price
-md = _signed_get(f'/trade-api/v2/markets/{market_ticker}')
-m  = md.get('market', {})
-yes_ask = m.get('yes_ask_dollars', 1.0)
-print(f'Yes ask: {yes_ask}')
-
-# Place market order at ask
-client = get_client()
-pa     = kalshi_python.PortfolioApi(api_client=client)
-order  = pa.create_order(
-    ticker          = market_ticker,
-    action          = 'buy',
-    side            = 'yes',
-    type            = 'market',
-    count           = 1,
-    client_order_id = str(uuid.uuid4()),
-)
-print(f'Order: {order.order.status} @ {order.order.yes_price}c')
-"  2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-import kalshi_python, uuid, requests, base64, time, re
-from functools import reduce
-from core.kalshi_client import get_client, _signed_get
-from combo_scanner import scan_all_props, build_highconf_combo
-from core.config import config
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-# Calculate fair price from individual leg prices
-fair_price = reduce(lambda a,b: a*b, [l.implied_prob for l in hc.legs], 1.0)
-price_cents = max(1, int(fair_price * 100))
-print(f'Fair price: {fair_price:.4f} = {price_cents}c')
-print(f'Payout if hit: {1/fair_price:.1f}x')
-
-with open(config.KALSHI_KEY_FILE, 'rb') as f:
-    private_key = serialization.load_pem_private_key(f.read(), password=None)
-
-def pss_headers(method, path):
-    ts  = str(int(time.time() * 1000))
-    sig = private_key.sign((ts+method+path).encode(),
-          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
-          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
-    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
-            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
-            'KALSHI-ACCESS-TIMESTAMP': ts, 'Content-Type': 'application/json'}
-
-def event_ticker(t):
-    m = re.match(r'(KXNBA[A-Z0-9]+-\d{2}[A-Z]{3}\d{2}[A-Z]+)', t)
-    return m.group(1) if m else t.rsplit('-', 2)[0]
-
-selected = [{'market_ticker': l.ticker, 'event_ticker': event_ticker(l.ticker), 'side': 'yes'} for l in hc.legs]
-cp = '/trade-api/v2/multivariate_event_collections/KXMVESPORTSMULTIGAMEEXTENDED-R'
-rc = requests.post(f'https://api.elections.kalshi.com{cp}',
-     headers=pss_headers('POST', cp),
-     json={'selected_markets': selected, 'with_market_payload': True}, timeout=8)
-market_ticker = rc.json().get('market_ticker')
-print(f'Market: {market_ticker}')
-
-client = get_client()
-pa     = kalshi_python.PortfolioApi(api_client=client)
-order  = pa.create_order(
-    ticker          = market_ticker,
-    action          = 'buy',
-    side            = 'yes',
-    type            = 'limit',
-    yes_price       = price_cents,
-    count           = 1,
-    client_order_id = str(uuid.uuid4()),
-)
-print(f'Order: {order.order.status} id={order.order.order_id}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-import kalshi_python
-from core.kalshi_client import get_client
-
-client = get_client()
-pa = kalshi_python.PortfolioApi(api_client=client)
-pa.cancel_order('379e6885-e44e-4594-a4ce-864c52f13eba')
-print('Cancelled')
-"
-python3 -c "
-import time, logging
-logging.basicConfig(level=logging.WARNING)
-from combo_scanner import scan_all_props, build_highconf_combo, submit_rfq, ComboCandidate
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-all_legs = hc.legs
-
-print(f'Testing leg counts from 4 to {len(all_legs)}...')
-print()
-
-for n in [4, 6, 8, 10, 12, 15, 18, 20, 25, 30]:
-    if n > len(all_legs):
-        break
-    subset    = all_legs[:n]
-    candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', subset)
-    payout    = candidate.expected_payout
-    
-    print(f'Testing {n:2d} legs | {payout:6.1f}x | \$5->\${5*payout:6.0f}...')
-    quote = submit_rfq(candidate)
-    if quote:
-        bid = quote.get('yes_bid_dollars', '?')
-        print(f'  ✅ QUOTED at {bid}')
-    else:
-        print(f'  ❌ No quote')
-    time.sleep(2)
-" 2>&1 | grep -E "Testing|QUOTED|No quote"
-Testing leg counts from 4 to 30...
-Testing  4 legs |    2.1x | $5->$    10...
-Testing  6 legs |    2.9x | $5->$    14...
-Testing  8 legs |    3.8x | $5->$    19...
-Testing 10 legs |    4.7x | $5->$    24...
-Testing 12 legs |    5.8x | $5->$    29...
-Testing 15 legs |    7.5x | $5->$    38...
-Testing 18 legs |   15.0x | $5->$    75...
-Testing 20 legs |   24.3x | $5->$   121...
-Testing 25 legs |   92.2x | $5->$   461...
-Testing 30 legs |  329.6x | $5->$  1648...
-(kalshi-bot) root@Kalshi-bot:~/kalshi-bot-v2#
-cd /root/kalshi-bot-v2 && python3 -c "
-import json
-trades = json.load(open('data/combo_trades.json'))
-print(f'Total combos: {len(trades)}')
-print()
-for t in trades[-5:]:
-    mode    = t.get('mode', 'unknown')
-    legs    = len(t.get('legs', []))
-    payout  = t.get('expected_payout', 0)
-    quote   = t.get('quote', {})
-    bid     = quote.get('yes_bid_dollars', '?')
-    time_   = t['time'][:16]
-    print(f'{time_} | {mode:10s} | {legs} legs | {payout:.1f}x | quote bid=\${bid}')
-"
-grep "0.05\|min.*quote\|quote.*min" /root/kalshi-bot-v2/combo_scanner.py | head -5
-python3 -c "
-import json
-trades = json.load(open('data/combo_trades.json'))
-for t in trades[-3:]:
-    mode   = t.get('mode','?')
-    legs   = t.get('legs',[])
-    payout = t.get('expected_payout',0)
-    bid    = t.get('quote',{}).get('yes_bid_dollars','?')
-    print(f'{t[\"time\"][:16]} | {mode} | {len(legs)} legs | {payout:.1f}x | bid=\${bid}')
-    for l in legs[:5]:
-        print(f'  {l[-30:]}')
-"
-python3 -c "
-import json
-trades = json.load(open('data/combo_trades.json'))
-print(f'Total: {len(trades)}')
-for t in trades:
-    bid = float(t.get('quote',{}).get('yes_bid_dollars',0) or 0)
-    print(f'{t[\"time\"][:16]} | {len(t.get(\"legs\",[]))} legs | {t.get(\"expected_payout\",0):.1f}x | bid=\${bid:.4f} | {\"✅\" if bid >= 0.05 else \"❌ garbage\"}')
-"
-sed -n '395,430p' /root/kalshi-bot-v2/combo_scanner.py
-sed -n '355,400p' /root/kalshi-bot-v2/combo_scanner.py
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''    if ev <= 0:
-        log.info(f"[Combo] Quote rejected — negative EV")
-        return None'''
-
-new = '''    # Minimum payout check — reject if less than 10x
-    min_payout = 10.0
-    actual_payout = stake_dollars / yes_bid if yes_bid > 0 else 0
-    if actual_payout < min_payout:
-        log.info(f"[Combo] Quote rejected — payout {actual_payout:.1f}x below {min_payout}x minimum")
-        return None
-
-    if ev <= 0:
-        log.info(f"[Combo] Quote rejected — negative EV")
-        return None'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-git add -A && git commit -m "fix: minimum 10x payout before accepting quote" && git push origin master
-cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|quote|EXECUTED|rejected|payout" | head -20
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/data/nba_stats.py', 'r')
-c = f.read()
-f.close()
-
-old = '''            injuries = athlete.get('injuries', [])
-            if injuries:
-                s = str(injuries[0].get('status', 'Active')).lower()
-            else:
-                status = athlete.get('status', {})
-                if isinstance(status, dict):
-                    type_val = status.get('type', 'active')
-                    s = str(type_val).lower() if not isinstance(type_val, dict) else 'active'
-                else:
-                    s = str(status).lower()'''
-
-new = '''            injuries = athlete.get('injuries', [])
-            if injuries:
-                s = str(injuries[0].get('status', 'Active')).lower()
-            else:
-                status = athlete.get('status', {})
-                if isinstance(status, dict):
-                    type_val = status.get('type', 'active')
-                    s = str(type_val).lower() if not isinstance(type_val, dict) else 'active'
-                else:
-                    s = str(status).lower()
-            # Also check deactivated flag
-            if athlete.get('deactivated', False):
-                s = 'out'
-            # Check active flag
-            if not athlete.get('active', True):
-                s = 'out' '''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/data/nba_stats.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "
-import json
-trades = json.load(open('data/combo_trades.json'))
-total_spent = 0
-garbage = 0
-for t in trades:
-    bid    = float(t.get('quote',{}).get('yes_bid_dollars',0) or 0)
-    stake  = 5.0
-    payout = stake / bid if bid > 0 else 0
-    total_spent += stake
-    if payout < 10:
-        garbage += stake
-        print(f'GARBAGE: {t[\"time\"][:16]} | {payout:.1f}x payout | \${stake} wasted')
-
-print(f'Total spent on combos: \${total_spent:.2f}')
-print(f'Spent on garbage combos: \${garbage:.2f}')
-
-from core.kalshi_client import get_balance
-bal = get_balance()
-print(f'Current balance: \${bal:.2f}')
-"
-screen -S combo -X quit
-echo "Combo scheduler stopped — balance too low"
-cd /root/kalshi-bot-v2 && python3 -c "
-from core.kalshi_client import _signed_get
-
-# Find Turner's prop market and get last price
-tickers = [
-    'KXNBAPTS-26MAR29LACMIL-LACMTURNER33-10',  # 10+ pts
-    'KXNBAREB-26MAR29LACMIL-MILMTURNER3-4',    # 4+ reb
-]
-for t in tickers:
-    try:
-        d = _signed_get(f'/trade-api/v2/markets/{t}')
-        m = d.get('market', {})
-        print(f'{t[-20:]}')
-        print(f'  yes_bid={m.get(\"yes_bid_dollars\")} yes_ask={m.get(\"yes_ask_dollars\")} last={m.get(\"last_price_dollars\")}')
-    except Exception as e:
-        print(f'{t[-20:]}: {e}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING
-cat > /root/kalshi-bot-v2/data/price_monitor.py << 'PYEOF'
-#!/usr/bin/env python3
-"""
-data/price_monitor.py
-─────────────────────────────────────────────────────────────────────────────
-Monitors leg prices over a window and returns a confidence adjustment.
-
-Logic:
-    - Sample yes_bid at start and end of window
-    - Calculate drift (end - start)
-    - Apply penalty/boost to confidence
-    - If drift exceeds threshold, trigger LLM investigation
-"""
-
-import logging
-import time
-import requests as req
-from core.kalshi_client import _signed_get
-from core.config import config
-
-log = logging.getLogger("kalshi_bot.price_monitor")
-
-ANTHROPIC_URL    = "https://api.anthropic.com/v1/messages"
-SAMPLE_INTERVAL  = 60    # seconds between samples
-MIN_SAMPLES      = 3     # minimum samples before deciding
-DRIFT_WARN       = -0.03 # -3¢ triggers LLM investigation
-DRIFT_SKIP       = -0.08 # -8¢ automatic confidence kill
-DRIFT_BOOST      = 0.03  # +3¢ adds confidence
-
-
-def get_yes_bid(ticker: str) -> float:
-    """Fetch current yes_bid for a market."""
-    try:
-        data = _signed_get(f'/trade-api/v2/markets/{ticker}')
-        return float(data.get('market', {}).get('yes_bid_dollars', 0) or 0)
-    except Exception:
-        return 0.0
-
-
-def sample_prices(tickers: list[str], window_secs: int = 300) -> dict[str, list[float]]:
-    """
-    Sample prices for all tickers over the window.
-    Returns {ticker: [price1, price2, ...]}
-    """
-    samples = {t: [] for t in tickers}
-    n_samples = max(MIN_SAMPLES, window_secs // SAMPLE_INTERVAL)
-    interval  = window_secs / n_samples
-
-    log.info(f"[PriceMonitor] Sampling {len(tickers)} legs over {window_secs}s ({n_samples} samples)")
-
-    for i in range(n_samples):
-        for ticker in tickers:
-            price = get_yes_bid(ticker)
-            if price > 0:
-                samples[ticker].append(price)
-        if i < n_samples - 1:
-            time.sleep(interval)
-
-    return samples
-
-
-def analyze_drift(samples: dict[str, list[float]]) -> dict[str, dict]:
-    """
-    Analyze price drift for each ticker.
-    Returns {ticker: {drift, trend, adjustment, investigate}}
-    """
-    results = {}
-    for ticker, prices in samples.items():
-        if len(prices) < 2:
-            results[ticker] = {
-                'drift': 0.0, 'trend': 'unknown',
-                'adjustment': 0.0, 'investigate': False
-            }
-            continue
-
-        start   = prices[0]
-        end     = prices[-1]
-        drift   = round(end - start, 3)
-        avg     = sum(prices) / len(prices)
-        volatility = max(prices) - min(prices)
-
-        # Determine trend
-        if drift >= DRIFT_BOOST:
-            trend = 'rising'
-        elif drift <= DRIFT_SKIP:
-            trend = 'collapsing'
-        elif drift <= DRIFT_WARN:
-            trend = 'falling'
-        elif abs(drift) < 0.01:
-            trend = 'stable'
-        else:
-            trend = 'noise'
-
-        # Calculate confidence adjustment
-        if trend == 'rising':
-            adjustment = min(0.05, drift * 1.5)   # boost up to +5%
-        elif trend == 'collapsing':
-            adjustment = -0.15                     # hard penalty
-        elif trend == 'falling':
-            adjustment = drift * 2                 # proportional penalty
-        elif trend == 'stable':
-            adjustment = 0.02                      # small stability bonus
-        else:
-            adjustment = 0.0
-
-        investigate = trend in ('falling', 'collapsing')
-
-        results[ticker] = {
-            'drift':       drift,
-            'trend':       trend,
-            'adjustment':  round(adjustment, 3),
-            'investigate': investigate,
-            'start':       start,
-            'end':         end,
-            'volatility':  round(volatility, 3),
-        }
-
-        log.info(f"[PriceMonitor] {ticker[-25:]} "
-                 f"drift={drift:+.3f} trend={trend} adj={adjustment:+.3f}")
-
-    return results
-
-
-def llm_investigate(ticker: str, drift: float, player_name: str, stat: str) -> str:
-    """
-    Ask Claude Haiku why a price is falling.
-    Returns: 'skip', 'caution', or 'hold'
-    """
-    if not config.ANTHROPIC_API_KEY:
-        return 'caution'
-
-    prompt = f"""A Kalshi NBA prop market is falling in price pre-game.
-
-Player: {player_name}
-Prop: {stat}
-Price drift: {drift:+.3f} in last 5 minutes
-
-Possible reasons:
-1. Player injury/DNP announced
-2. Lineup change
-3. Low volume noise
-4. Market maker adjustment
-5. Sharp money fading
-
-Based on typical NBA pre-game dynamics, what is the most likely reason?
-Respond with ONLY one word: skip, caution, or hold
-- skip: likely injury/DNP, avoid this leg
-- caution: uncertain, reduce confidence
-- hold: probably noise, keep the leg"""
-
-    try:
-        r = req.post(ANTHROPIC_URL, headers={
-            "x-api-key":         config.ANTHROPIC_API_KEY,
-            "anthropic-version": "2023-06-01",
-            "content-type":      "application/json",
-        }, json={
-            "model":      "claude-haiku-4-5-20251001",
-            "max_tokens": 10,
-            "messages":   [{"role": "user", "content": prompt}],
-        }, timeout=8)
-        response = r.json().get("content", [{}])[0].get("text", "caution").strip().lower()
-        if response not in ('skip', 'caution', 'hold'):
-            return 'caution'
-        log.info(f"[PriceMonitor] LLM verdict for {player_name}: {response}")
-        return response
-    except Exception as e:
-        log.debug(f"[PriceMonitor] LLM error: {e}")
-        return 'caution'
-
-
-def get_price_adjustments(legs: list, window_secs: int = 300) -> dict[str, float]:
-    """
-    Main entry point. Monitor prices and return confidence adjustments per ticker.
-
-    Args:
-        legs: list of ComboLeg objects
-        window_secs: how long to monitor (default 5 min)
-
-    Returns:
-        {ticker: confidence_adjustment}  e.g. {'KXNBA...': -0.08}
-    """
-    tickers  = [l.ticker for l in legs]
-    leg_map  = {l.ticker: l for l in legs}
-    samples  = sample_prices(tickers, window_secs)
-    analysis = analyze_drift(samples)
-
-    adjustments = {}
-    for ticker, result in analysis.items():
-        adj = result['adjustment']
-
-        # LLM investigation for falling prices
-        if result['investigate'] and ticker in leg_map:
-            leg        = leg_map[ticker]
-            player     = leg.reasoning.split(' avg')[0] if ' avg' in leg.reasoning else ticker
-            series     = ticker.split('-')[0]
-            stat       = {'KXNBAPTS':'points','KXNBAREB':'rebounds','KXNBAAST':'assists',
-                         'KXNBA3PT':'threes','KXNBASTL':'steals','KXNBABLK':'blocks'}.get(series,'stat')
-            verdict    = llm_investigate(ticker, result['drift'], player, stat)
-
-            if verdict == 'skip':
-                adj = -1.0   # effectively removes leg
-            elif verdict == 'caution':
-                adj = min(adj, -0.05)
-            elif verdict == 'hold':
-                adj = max(adj, -0.01)  # near zero
-
-        adjustments[ticker] = adj
-
-    return adjustments
-PYEOF
-
-echo "Written — $(wc -l < /root/kalshi-bot-v2/data/price_monitor.py) lines"
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/data/prop_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''def build_edge_combo(legs: list[dict], max_legs: int = 12,
-                     min_payout: float = 20.0) -> list[dict]:'''
-
-new = '''def apply_price_monitoring(legs: list, window_secs: int = 300) -> list:
-    """
-    Monitor prices and adjust confidence scores.
-    Removes or penalizes legs where price is falling significantly.
-    """
-    from data.price_monitor import get_price_adjustments
-    from combo_scanner import ComboLeg
-
-    # Convert dicts to ComboLeg-like objects for price monitor
-    class _Leg:
-        def __init__(self, d):
-            self.ticker    = d['ticker']
-            self.reasoning = d['reasoning']
-
-    leg_objs    = [_Leg(l) for l in legs]
-    adjustments = get_price_adjustments(leg_objs, window_secs)
-
-    adjusted = []
-    for leg in legs:
-        adj      = adjustments.get(leg['ticker'], 0.0)
-        new_conf = leg['model_conf'] + adj
-
-        if new_conf <= 0 or adj <= -0.99:
-            log.info(f"[PropScanner] Dropping leg after price monitor: {leg['ticker'][-25:]}")
-            continue
-
-        leg = dict(leg)
-        leg['model_conf'] = round(max(0, new_conf), 3)
-        leg['edge']       = round(leg['model_conf'] - leg['market_price'], 3)
-        leg['price_adj']  = adj
-        adjusted.append(leg)
-
-    log.info(f"[PropScanner] Price monitor: {len(legs)} -> {len(adjusted)} legs")
-    return adjusted
-
-
-def build_edge_combo(legs: list[dict], max_legs: int = 12,
-                     min_payout: float = 20.0) -> list[dict]:'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/data/prop_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''    log.info("[Combo] Starting combo scan — MOONSHOT + HIGH CONF modes")
-    candidates = []
-    legs       = scan_all_props()'''
-
-new = '''    log.info("[Combo] Starting combo scan — MOONSHOT + HIGH CONF modes")
-    candidates = []
-    legs       = scan_all_props()
-
-    # ── Price monitoring (5 min window) ───────────────────────────────
-    if not dry_run and legs:
-        log.info("[Combo] Running price monitor (5 min)...")
-        from data.prop_scanner import apply_price_monitoring
-        # Convert ComboLegs to dicts for price monitor
-        leg_dicts = [{
-            'ticker':     l.ticker,
-            'model_conf': l.confidence,
-            'market_price': l.implied_prob,
-            'edge':       l.confidence - l.implied_prob,
-            'reasoning':  l.reasoning,
-        } for l in legs]
-        monitored = apply_price_monitoring(leg_dicts, window_secs=300)
-        # Rebuild ComboLegs with adjusted confidence
-        legs = [ComboLeg(
-            ticker            = d['ticker'],
-            collection_ticker = 'KXMVESPORTSMULTIGAMEEXTENDED-R',
-            confidence        = d['model_conf'],
-            implied_prob      = d['market_price'],
-            is_yes_only       = True,
-            reasoning         = d['reasoning'],
-        ) for d in monitored if d['edge'] >= 0.02]
-        log.info(f"[Combo] After price monitor: {len(legs)} legs remain")'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "from data.price_monitor import get_price_adjustments; print('OK')"
-git add -A && git commit -m "feat: price monitoring — watch leg prices pre-entry, LLM investigates drops" && git push origin master
-cd /root/kalshi-bot-v2 && python3 combo_scanner.py 2>&1 | grep -E "Combo|Monitor|PropScanner" | head -15
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-legs = scan_all_props()
-hc = build_highconf_combo(legs)
-if hc:
-    print(f'HC: {len(hc.legs)} legs | {hc.expected_payout:.1f}x')
-else:
-    from combo_scanner import HC_MIN_CONF
-    qualified = [l for l in legs if l.confidence >= HC_MIN_CONF]
-    print(f'HC qualified legs: {len(qualified)} (need 2+)')
-    print(f'HC_MIN_CONF: {HC_MIN_CONF}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-screen -ls
-python3 -c "
-from datetime import datetime, timezone
-scans = [
-    '2026-03-29T21:00Z',  # 9 PM UTC - 30min before NYK/OKC
-    '2026-03-29T22:30Z',  # 10:30 PM UTC - 2hr before HOU/NOP  
-    '2026-03-29T23:00Z',  # 11 PM UTC - 30min before HOU/NOP
-    '2026-03-30T00:00Z',  # midnight - 2hr before GSW/DEN
-    '2026-03-30T01:30Z',  # 1:30 AM - 30min before GSW/DEN
-]
-now = datetime.now(timezone.utc)
-for s in scans:
-    dt = datetime.fromisoformat(s.replace('Z','+00:00'))
-    if dt > now:
-        diff = int((dt-now).total_seconds()/60)
-        print(f'  {dt.strftime(\"%I:%M %p UTC\")} — in {diff} min')
-"
-screen -S combo bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py; exec bash'
-python3 -c "
-import requests
-ids = ['4432068', '6442', '4432452', '3074752', '6606']
-for espn_id in ids:
-    r = requests.get(f'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/athletes/{espn_id}', timeout=6)
-    if r.status_code == 200:
-        a = r.json().get('athlete', {})
-        print(f'{espn_id}: {a.get(\"fullName\",\"?\")} — active={a.get(\"active\")} team={a.get(\"team\",{}).get(\"abbreviation\",\"none\")}')
-    else:
-        print(f'{espn_id}: HTTP {r.status_code}')
-"
-source /root/kalshi-bot/bin/activate
-pip install fastapi uvicorn --break-system-packages
-cat > /root/kalshi-bot-v2/api_server.py << 'PYEOF'
-#!/usr/bin/env python3
-"""
-api_server.py
-─────────────────────────────────────────────────────────────────────────────
-FastAPI server exposing kalshi-bot-v2 data to the mobile app.
-Read-only — never touches trading logic.
-
-Run: uvicorn api_server:app --host 0.0.0.0 --port 8080
-"""
-
-import os
-import json
-import sys
-sys.path.insert(0, '/root/kalshi-bot-v2')
-
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timezone
-
-app = FastAPI(title="Kalshi Bot API", version="1.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ── Auth ───────────────────────────────────────────────────────────────────
-
-API_KEY = os.getenv("BOT_API_KEY", "changeme123")
-
-def verify_key(x_api_key: str = Header(...)):
-    if x_api_key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-
-
-# ── Routes ─────────────────────────────────────────────────────────────────
-
-@app.get("/health")
-def health():
-    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
-
-
-@app.get("/api/balance")
-def get_balance(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    try:
-        from core.kalshi_client import get_balance
-        bal = get_balance()
-        return {"balance": round(bal, 2)}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/combos")
-def get_combos(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    log_file = "/root/kalshi-bot-v2/data/combo_trades.json"
-    if not os.path.exists(log_file):
-        return {"combos": []}
-    try:
-        combos = json.load(open(log_file))
-        return {"combos": combos[-10:]}  # Last 10
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/parlay/moonshot")
-def get_moonshot(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    try:
-        from combo_scanner import scan_all_props, build_best_combo
-        legs      = scan_all_props()
-        candidate = build_best_combo(legs)
-        if not candidate:
-            return {"found": False, "legs": [], "payout": 0, "confidence": 0}
-        return {
-            "found":      True,
-            "mode":       "moonshot",
-            "leg_count":  len(candidate.legs),
-            "payout":     round(candidate.expected_payout, 1),
-            "confidence": round(candidate.combined_confidence * 100, 2),
-            "stake":      5.0,
-            "win_amount": round(5.0 * candidate.expected_payout, 0),
-            "legs": [{
-                "ticker":     l.ticker,
-                "player":     l.reasoning.split(' avg')[0],
-                "reasoning":  l.reasoning,
-                "confidence": round(l.confidence * 100, 1),
-                "market_price": round(l.implied_prob * 100, 0),
-                "edge":       round((l.confidence - l.implied_prob) * 100, 1),
-            } for l in candidate.legs]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/parlay/monster")
-def get_monster(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    try:
-        from combo_scanner import scan_all_props, build_highconf_combo
-        legs      = scan_all_props()
-        candidate = build_highconf_combo(legs)
-        if not candidate:
-            return {"found": False, "legs": [], "payout": 0, "confidence": 0}
-        return {
-            "found":      True,
-            "mode":       "monster",
-            "leg_count":  len(candidate.legs),
-            "payout":     round(candidate.expected_payout, 1),
-            "confidence": round(candidate.combined_confidence * 100, 2),
-            "stake":      5.0,
-            "win_amount": round(5.0 * candidate.expected_payout, 0),
-            "legs": [{
-                "ticker":     l.ticker,
-                "player":     l.reasoning.split(' avg')[0],
-                "reasoning":  l.reasoning,
-                "confidence": round(l.confidence * 100, 1),
-                "market_price": round(l.implied_prob * 100, 0),
-                "edge":       round((l.confidence - l.implied_prob) * 100, 1),
-            } for l in candidate.legs]
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/schedule")
-def get_schedule(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    try:
-        import requests
-        from datetime import date
-        today = date.today().strftime("%Y%m%d")
-        r = requests.get(
-            f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={today}",
-            timeout=6
-        )
-        games = []
-        for event in r.json().get("events", []):
-            comps = event.get("competitions", [{}])[0]
-            teams = comps.get("competitors", [])
-            status = comps.get("status", {}).get("type", {})
-            games.append({
-                "name":    event.get("name", ""),
-                "date":    event.get("date", ""),
-                "status":  status.get("name", ""),
-                "completed": status.get("completed", False),
-                "teams":   [{"abbr": t.get("team",{}).get("abbreviation",""),
-                             "score": t.get("score","0")} for t in teams]
-            })
-        return {"games": games}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/api/stats")
-def get_stats(x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-    import csv
-    from collections import defaultdict
-
-    result = {}
-
-    # Paper trades v2
-    paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
-    if os.path.exists(paper_file):
-        rows     = list(csv.DictReader(open(paper_file)))
-        resolved = [r for r in rows if r.get('resolved','') not in ('','no')]
-        wins     = sum(1 for r in resolved if float(r.get('hyp_pnl',0) or 0) > 0)
-        pnl      = sum(float(r.get('hyp_pnl',0) or 0) for r in resolved)
-        result["paper"] = {
-            "total":    len(rows),
-            "resolved": len(resolved),
-            "wins":     wins,
-            "win_rate": round(wins/len(resolved)*100, 1) if resolved else 0,
-            "pnl":      round(pnl, 2)
-        }
-
-    # Combo stats
-    combo_file = "/root/kalshi-bot-v2/data/combo_trades.json"
-    if os.path.exists(combo_file):
-        combos = json.load(open(combo_file))
-        result["combos"] = {
-            "total":  len(combos),
-            "spent":  len(combos) * 5.0,
-        }
-
-    return result
-
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8080)
-PYEOF
-
-echo "Written — $(wc -l < /root/kalshi-bot-v2/api_server.py) lines"
-echo "BOT_API_KEY=$(openssl rand -hex 16)" >> /root/.env
-grep "BOT_API_KEY" /root/.env | tail -1
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 api_server.py &
-sleep 3
-# Test health endpoint
-curl -s http://localhost:8080/health | python3 -m json.tool
-# Get the API key
-API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
-echo "API Key: $API_KEY"
-# Test balance
-curl -s http://localhost:8080/api/balance -H "x-api-key: $API_KEY" | python3 -m json.tool
-# Test schedule
-curl -s http://localhost:8080/api/schedule -H "x-api-key: $API_KEY" | python3 -m json.tool | head -30
-kill %1
-source /root/kalshi-bot/bin/activate
-cd /root/kalshi-bot-v2
-API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
-echo "Key: $API_KEY"
-BOT_API_KEY=$API_KEY python3 api_server.py &
-sleep 3
-curl -s http://localhost:8080/api/balance -H "x-api-key: $API_KEY" | python3 -m json.tool
-API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
-# Stats
-curl -s http://localhost:8080/api/stats -H "x-api-key: $API_KEY" | python3 -m json.tool
-# Schedule
-curl -s http://localhost:8080/api/schedule -H "x-api-key: $API_KEY" | python3 -m json.tool | head -40
-# Combos
-curl -s http://localhost:8080/api/combos -H "x-api-key: $API_KEY" | python3 -m json.tool | head -20
-kill %1
-screen -S api bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && BOT_API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d"=" -f2) python3 api_server.py; exec bash'
-git add api_server.py && git commit -m "feat: REST API server for mobile app — balance, combos, parlay, schedule, stats" && git push origin master
-grep "BOT_API_KEY" /root/.env | tail -1
-mkdir -p /root/kalshi-bot-v2/app
-cat > /root/kalshi-bot-v2/app/index.html << 'PYEOF'
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
-  <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Kalshi Bot">
-  <title>Kalshi Bot</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      background: #0a0a0a;
-      color: #fff;
-      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      min-height: 100vh;
-      padding-bottom: 80px;
-    }
-    .header {
-      background: linear-gradient(135deg, #1a1a2e, #16213e);
-      padding: 50px 20px 20px;
-      border-bottom: 1px solid #333;
-    }
-    .header h1 { font-size: 28px; font-weight: 700; }
-    .header p  { color: #888; font-size: 13px; margin-top: 4px; }
-    .balance-card {
-      background: linear-gradient(135deg, #00b894, #00cec9);
-      margin: 16px;
-      border-radius: 16px;
-      padding: 20px;
-    }
-    .balance-card .label { font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; }
-    .balance-card .amount { font-size: 42px; font-weight: 700; margin-top: 4px; }
-    .balance-card .sub { font-size: 12px; opacity: 0.8; margin-top: 4px; }
-    .section { margin: 16px; }
-    .section-title {
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      color: #666;
-      margin-bottom: 10px;
-    }
-    .btn-row { display: flex; gap: 10px; }
-    .btn {
-      flex: 1;
-      padding: 16px;
-      border-radius: 14px;
-      border: none;
-      font-size: 15px;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 6px;
-      transition: opacity 0.2s;
-    }
-    .btn:active { opacity: 0.7; }
-    .btn .icon { font-size: 28px; }
-    .btn-moonshot { background: linear-gradient(135deg, #6c5ce7, #a29bfe); color: #fff; }
-    .btn-monster  { background: linear-gradient(135deg, #e17055, #d63031); color: #fff; }
-    .card {
-      background: #1a1a1a;
-      border-radius: 14px;
-      padding: 16px;
-      margin-bottom: 10px;
-      border: 1px solid #2a2a2a;
-    }
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .card-title { font-size: 16px; font-weight: 600; }
-    .badge {
-      font-size: 11px;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-weight: 600;
-    }
-    .badge-green  { background: #00b894; color: #fff; }
-    .badge-purple { background: #6c5ce7; color: #fff; }
-    .badge-red    { background: #d63031; color: #fff; }
-    .leg {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 0;
-      border-bottom: 1px solid #2a2a2a;
-      font-size: 13px;
-    }
-    .leg:last-child { border-bottom: none; }
-    .leg-name { color: #ddd; flex: 1; }
-    .leg-conf { color: #00b894; font-weight: 600; font-size: 12px; margin-left: 8px; }
-    .leg-edge { color: #6c5ce7; font-size: 11px; margin-left: 6px; }
-    .payout-row {
-      display: flex;
-      justify-content: space-between;
-      margin-top: 12px;
-      padding-top: 12px;
-      border-top: 1px solid #2a2a2a;
-    }
-    .payout-label { color: #888; font-size: 13px; }
-    .payout-value { font-size: 20px; font-weight: 700; color: #00b894; }
-    .game-card {
-      background: #1a1a1a;
-      border-radius: 14px;
-      padding: 14px 16px;
-      margin-bottom: 8px;
-      border: 1px solid #2a2a2a;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .game-teams { font-size: 14px; font-weight: 600; }
-    .game-score { font-size: 18px; font-weight: 700; color: #00b894; }
-    .game-status { font-size: 11px; color: #888; margin-top: 2px; }
-    .loading {
-      text-align: center;
-      padding: 40px;
-      color: #666;
-    }
-    .spinner {
-      width: 32px; height: 32px;
-      border: 3px solid #333;
-      border-top-color: #00b894;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin: 0 auto 12px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .nav {
-      position: fixed;
-      bottom: 0; left: 0; right: 0;
-      background: #111;
-      border-top: 1px solid #2a2a2a;
-      display: flex;
-      padding-bottom: env(safe-area-inset-bottom);
-    }
-    .nav-item {
-      flex: 1;
-      padding: 12px 0;
-      text-align: center;
-      cursor: pointer;
-      font-size: 10px;
-      color: #666;
-      transition: color 0.2s;
-    }
-    .nav-item.active { color: #00b894; }
-    .nav-item .nav-icon { font-size: 22px; display: block; margin-bottom: 2px; }
-    .screen { display: none; }
-    .screen.active { display: block; }
-    .error { color: #e17055; font-size: 13px; text-align: center; padding: 20px; }
-    .refresh-btn {
-      background: #1a1a1a;
-      border: 1px solid #333;
-      color: #888;
-      padding: 8px 16px;
-      border-radius: 20px;
-      font-size: 12px;
-      cursor: pointer;
-      margin-top: 8px;
-    }
-  </style>
-</head>
-<body>
-
-<!-- HOME -->
-<div id="screen-home" class="screen active">
-  <div class="header">
-    <h1>🤖 Kalshi Bot</h1>
-    <p id="last-updated">Loading...</p>
-  </div>
-
-  <div class="balance-card">
-    <div class="label">Portfolio Balance</div>
-    <div class="amount" id="balance-amount">--</div>
-    <div class="sub" id="combo-sub">Loading...</div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Find Best Combo</div>
-    <div class="btn-row">
-      <button class="btn btn-moonshot" onclick="showParlay('moonshot')">
-        <span class="icon">🎯</span>
-        <span>Moonshot</span>
-      </button>
-      <button class="btn btn-monster" onclick="showParlay('monster')">
-        <span class="icon">💪</span>
-        <span>Monster</span>
-      </button>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title">Tonight's Games</div>
-    <div id="games-list"><div class="loading"><div class="spinner"></div>Loading...</div></div>
-  </div>
-</div>
-
-<!-- PARLAY -->
-<div id="screen-parlay" class="screen">
-  <div class="header">
-    <h1 id="parlay-title">🎯 Moonshot</h1>
-    <p id="parlay-sub">Scanning props...</p>
-  </div>
-  <div class="section" id="parlay-content">
-    <div class="loading"><div class="spinner"></div>Scanning props...</div>
-  </div>
-</div>
-
-<!-- COMBOS -->
-<div id="screen-combos" class="screen">
-  <div class="header">
-    <h1>📋 My Combos</h1>
-    <p>Recent combo trades</p>
-  </div>
-  <div class="section" id="combos-content">
-    <div class="loading"><div class="spinner"></div>Loading...</div>
-  </div>
-</div>
-
-<!-- STATS -->
-<div id="screen-stats" class="screen">
-  <div class="header">
-    <h1>📊 Stats</h1>
-    <p>Trading performance</p>
-  </div>
-  <div class="section" id="stats-content">
-    <div class="loading"><div class="spinner"></div>Loading...</div>
-  </div>
-</div>
-
-<!-- NAV -->
-<nav class="nav">
-  <div class="nav-item active" onclick="showScreen('home')">
-    <span class="nav-icon">🏠</span>Home
-  </div>
-  <div class="nav-item" onclick="showScreen('parlay-select')">
-    <span class="nav-icon">🎯</span>Parlay
-  </div>
-  <div class="nav-item" onclick="showScreen('combos')">
-    <span class="nav-icon">📋</span>Combos
-  </div>
-  <div class="nav-item" onclick="showScreen('stats')">
-    <span class="nav-icon">📊</span>Stats
-  </div>
-</nav>
-
-<script>
-const API_BASE = 'http://137.184.84.50:8080';
-const API_KEY  = 'REPLACE_ME';
-
-async function api(path) {
-  const r = await fetch(API_BASE + path, {
-    headers: { 'x-api-key': API_KEY }
-  });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-}
-
-function showScreen(name) {
-  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
-  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-
-  if (name === 'parlay-select') {
-    document.getElementById('screen-home').classList.add('active');
-    document.querySelectorAll('.nav-item')[1].classList.add('active');
-    document.querySelector('.section').scrollIntoView({behavior:'smooth'});
-    return;
-  }
-
-  const screens = ['home','parlay','combos','stats'];
-  const idx = screens.indexOf(name);
-  document.getElementById('screen-' + name).classList.add('active');
-  if (idx >= 0) document.querySelectorAll('.nav-item')[idx].classList.add('active');
-
-  if (name === 'combos') loadCombos();
-  if (name === 'stats')  loadStats();
-  if (name === 'home')   loadHome();
-}
-
-async function loadHome() {
-  try {
-    const [bal, sched] = await Promise.all([api('/api/balance'), api('/api/schedule')]);
-    document.getElementById('balance-amount').textContent = '$' + bal.balance.toFixed(2);
-    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
-
-    // Games
-    const gamesList = document.getElementById('games-list');
-    const games = sched.games.filter(g => !g.completed || g.status === 'STATUS_IN_PROGRESS');
-    if (!games.length) {
-      gamesList.innerHTML = '<div class="error">No games in progress</div>';
-    } else {
-      gamesList.innerHTML = games.map(g => {
-        const t = g.teams;
-        const score = t.length === 2 ? `${t[0].score} - ${t[1].score}` : '';
-        const status = g.status === 'STATUS_IN_PROGRESS' ? '🔴 LIVE' :
-                       g.status === 'STATUS_SCHEDULED' ? '⏰ Soon' : '✅ Final';
-        return `<div class="game-card">
-          <div>
-            <div class="game-teams">${g.name.replace(' at ', ' @ ')}</div>
-            <div class="game-status">${status}</div>
-          </div>
-          <div class="game-score">${score}</div>
-        </div>`;
-      }).join('');
-    }
-
-    // Combo sub
-    const combos = await api('/api/combos');
-    document.getElementById('combo-sub').textContent =
-      `${combos.combos.length} combos placed`;
-  } catch(e) {
-    document.getElementById('balance-amount').textContent = 'Error';
-  }
-}
-
-async function showParlay(mode) {
-  showScreen('parlay');
-  const title = mode === 'monster' ? '💪 Monster Combo' : '🎯 Moonshot Combo';
-  document.getElementById('parlay-title').textContent = title;
-  document.getElementById('parlay-sub').textContent = 'Scanning props...';
-  document.getElementById('parlay-content').innerHTML =
-    '<div class="loading"><div class="spinner"></div>Scanning (~10s)...</div>';
-
-  try {
-    const data = await api('/api/parlay/' + mode);
-    document.getElementById('parlay-sub').textContent =
-      `${data.leg_count} legs · ${data.confidence}% conf`;
-
-    if (!data.found) {
-      document.getElementById('parlay-content').innerHTML =
-        '<div class="error">No qualifying combo right now. Try closer to game time.</div>';
-      return;
-    }
-
-    const legsHtml = data.legs.map(l => {
-      const player = l.player || l.ticker;
-      const thr = l.ticker.split('-').pop();
-      const series = l.ticker.split('-')[0];
-      const statMap = {KXNBAPTS:'pts',KXNBAREB:'reb',KXNBAAST:'ast',
-                       KXNBA3PT:'3s',KXNBASTL:'stl',KXNBABLK:'blk'};
-      const stat = statMap[series] || '';
-      return `<div class="leg">
-        <span class="leg-name">${player} ${thr}+ ${stat}</span>
-        <span class="leg-conf">${l.confidence}%</span>
-        <span class="leg-edge">+${l.edge}¢</span>
-      </div>`;
-    }).join('');
-
-    document.getElementById('parlay-content').innerHTML = `
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">${data.leg_count} Legs</span>
-          <span class="badge badge-green">${data.payout}x</span>
-        </div>
-        ${legsHtml}
-        <div class="payout-row">
-          <span class="payout-label">$5 stake → potential</span>
-          <span class="payout-value">$${data.win_amount}</span>
-        </div>
-      </div>
-      <button class="refresh-btn" onclick="showParlay('${mode}')">🔄 Rescan</button>`;
-  } catch(e) {
-    document.getElementById('parlay-content').innerHTML =
-      '<div class="error">Error: ' + e.message + '</div>';
-  }
-}
-
-async function loadCombos() {
-  try {
-    const data = await api('/api/combos');
-    const combos = data.combos.reverse();
-    if (!combos.length) {
-      document.getElementById('combos-content').innerHTML =
-        '<div class="error">No combos placed yet</div>';
-      return;
-    }
-    document.getElementById('combos-content').innerHTML = combos.map(c => {
-      const date = new Date(c.time).toLocaleDateString();
-      const payout = c.expected_payout ? c.expected_payout.toFixed(1) : '?';
-      const mode = c.mode || 'combo';
-      return `<div class="card">
-        <div class="card-header">
-          <span class="card-title">${c.legs.length}-leg ${mode}</span>
-          <span class="badge badge-purple">${payout}x</span>
-        </div>
-        <div style="color:#888;font-size:12px">${date} · ${c.legs.length} legs</div>
-      </div>`;
-    }).join('');
-  } catch(e) {
-    document.getElementById('combos-content').innerHTML =
-      '<div class="error">Error loading combos</div>';
-  }
-}
-
-async function loadStats() {
-  try {
-    const data = await api('/api/stats');
-    let html = '';
-    if (data.paper) {
-      const p = data.paper;
-      html += `<div class="card">
-        <div class="card-header">
-          <span class="card-title">V2 Paper Trader</span>
-          <span class="badge ${p.pnl >= 0 ? 'badge-green' : 'badge-red'}">
-            $${p.pnl >= 0 ? '+' : ''}${p.pnl}
-          </span>
-        </div>
-        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${p.win_rate}%</span></div>
-        <div class="leg"><span class="leg-name">Resolved</span><span class="leg-conf">${p.resolved}/${p.total}</span></div>
-      </div>`;
-    }
-    if (data.combos) {
-      html += `<div class="card">
-        <div class="card-header">
-          <span class="card-title">Combo Trades</span>
-          <span class="badge badge-purple">${data.combos.total} placed</span>
-        </div>
-        <div class="leg"><span class="leg-name">Total Spent</span><span class="leg-conf">$${data.combos.spent}</span></div>
-      </div>`;
-    }
-    document.getElementById('stats-content').innerHTML = html || '<div class="error">No stats yet</div>';
-  } catch(e) {
-    document.getElementById('stats-content').innerHTML =
-      '<div class="error">Error loading stats</div>';
-  }
-}
-
-// Boot
-loadHome();
-</script>
-</body>
-</html>
-PYEOF
-
-echo "Written"
-API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
-sed -i "s/REPLACE_ME/$API_KEY/" /root/kalshi-bot-v2/app/index.html
-echo "Key injected"
-# Serve the app on port 3000
-cd /root/kalshi-bot-v2/app && python3 -m http.server 3000 &
-echo "App running at http://137.184.84.50:3000"
-cd /root/kalshi-bot-v2 && python3 -c "
-from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
 from functools import reduce
 
 legs     = scan_all_props()
@@ -1998,3 +416,1585 @@ python combo_scanner.py
 cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
 python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
 cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
+source /root/kalshi-bot/bin/activate
+cd /root/kalshi-bot-v2 && echo "=== SYNTAX CHECK ===" && python3 -m py_compile bot.py && echo "bot.py OK" && python3 -m py_compile combo_scanner.py && echo "combo_scanner.py OK" && python3 -m py_compile data/nba_stats.py && echo "nba_stats.py OK" && python3 -m py_compile data/prop_scanner.py && echo "prop_scanner.py OK" && python3 -m py_compile data/player_stats.py && echo "player_stats.py OK" && python3 -m py_compile data/price_monitor.py && echo "price_monitor.py OK" && python3 -m py_compile data/persistent_cache.py && echo "persistent_cache.py OK" && python3 -m py_compile api_server.py && echo "api_server.py OK" && python3 -m py_compile telegram_bot.py && echo "telegram_bot.py OK"
+echo "=== V2 BOT STATUS ===" && systemctl status kalshi-bot-v2 | grep -E "Active|PID" && echo "" && echo "=== SCREENS ===" && screen -ls && echo "" && echo "=== BALANCE ===" && python3 -c "from core.kalshi_client import get_balance; print(f'\${get_balance():.2f}')" && echo "" && echo "=== V2 BOT TRADES ===" && python3 -c "
+import csv, os
+f = 'data/trade_log.csv'
+if os.path.exists(f):
+    rows = list(csv.DictReader(open(f)))
+    print(f'{len(rows)} trades placed')
+else:
+    print('No trade log yet')
+" && echo "" && echo "=== COMBO TRADES ===" && python3 -c "
+import json, os
+f = 'data/combo_trades.json'
+if os.path.exists(f):
+    trades = json.load(open(f))
+    good = [t for t in trades if float(t.get('quote',{}).get('_effective_yes', t.get('quote',{}).get('yes_bid_dollars',0)) or 0) >= 0.05]
+    print(f'{len(trades)} total combos placed')
+    print(f'{len(good)} at real prices')
+else:
+    print('No combos yet')
+" && echo "" && echo "=== CACHE HEALTH ===" && python3 -c "from data.persistent_cache import cache_stats; cache_stats()" && echo "" && echo "=== PAPER TRADER ===" && python3 paper_trader.py --stats
+screen -r paper-v2
+tail -20 /root/kalshi-bot-v2/kalshi_bot.log | grep -E "signal|trade|LLM|gate|strategy|confidence"
+grep -n "strategy\|evaluate\|signal\|confidence\|MIN_CONF\|threshold" /root/kalshi-bot-v2/strategies/nba.py | head -20
+grep -n "score\|threshold\|MIN\|PASS\|FAIL\|gate" /root/kalshi-bot-v2/confidence/llm_gate.py | head -20
+sed -n '25,45p' /root/kalshi-bot-v2/confidence/llm_gate.py
+grep -n "NBA_CONF_GATE\|TENNIS_CONF_GATE\|MLB_CONF_GATE" /root/kalshi-bot-v2/core/config.py
+tail -100 /root/kalshi-bot-v2/kalshi_bot.log | grep -E "LLM|conf|gate|signal|NBA|fade|momentum" | head -20
+sed -n '74,145p' /root/kalshi-bot-v2/strategies/nba.py
+python3 -c "
+from data.espn import get_game_context
+# Test with a live game ticker
+result = get_game_context('KXNBAGAME-26MAR29GSWDEN')
+print(result)
+" 2>&1 | grep -v DEBUG
+grep -n "get_game_context" /root/kalshi-bot-v2/strategies/nba.py | head -5
+python3 -c "
+from data.nba import get_game_context
+result = get_game_context('KXNBAGAME-26MAR29GSWDEN')
+print(result)
+" 2>&1 | grep -v DEBUG
+sed -n '1,60p' /root/kalshi-bot-v2/data/nba.py
+grep -n "def get_game_context" /root/kalshi-bot-v2/data/nba.py
+sed -n '81,140p' /root/kalshi-bot-v2/data/nba.py
+python3 -c "
+from core.kalshi_client import get_markets
+markets = get_markets()
+series = {}
+for m in markets:
+    s = m.ticker.split('-')[0]
+    series[s] = series.get(s, 0) + 1
+for k,v in sorted(series.items(), key=lambda x: -x[1])[:15]:
+    print(f'  {k}: {v}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+from core.kalshi_client import _signed_get
+data = _signed_get('/trade-api/v2/markets?limit=200&status=open')
+markets = data.get('markets', [])
+series = {}
+for m in markets:
+    s = m.get('ticker','').split('-')[0]
+    series[s] = series.get(s, 0) + 1
+for k,v in sorted(series.items(), key=lambda x: -x[1])[:15]:
+    print(f'  {k}: {v}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+grep -n "series_ticker\|KXNBA\|fetch" /root/kalshi-bot-v2/core/kalshi_client.py | head -20
+grep -n "KXNBA\|series\|fetch_markets\|get_markets" /root/kalshi-bot-v2/bot.py | head -20
+python3 -c "
+from core.kalshi_client import get_markets
+markets = get_markets('KXNBAGAME', limit=100)
+print(f'KXNBAGAME markets: {len(markets)}')
+for m in markets[:5]:
+    print(f'  {m.get(\"ticker\")} yes_bid={m.get(\"yes_bid_dollars\")}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+grep -E "Cycle [0-9]+ done.*[1-9] signal|NBAFade|NBAMomentum|is_live|fade_zone|spread_ok|volume_ok" /root/kalshi-bot-v2/kalshi_bot.log | head -20
+sed -n '330,400p' /root/kalshi-bot-v2/bot.py
+python3 -c "
+from bot import fetch_markets
+markets = fetch_markets()
+print(f'Total markets: {len(markets)}')
+sports = {}
+for m in markets:
+    s = str(m.sport)
+    sports[s] = sports.get(s, 0) + 1
+print('By sport:')
+for k,v in sports.items():
+    print(f'  {k}: {v}')
+
+# Show a few NBA markets
+nba = [m for m in markets if 'NBA' in str(m.sport)]
+print(f'NBA markets: {len(nba)}')
+for m in nba[:3]:
+    print(f'  {m.ticker} sport={m.sport} yes_bid={m.yes_bid}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+from core.kalshi_client import _signed_get
+# Check if any of tonight's game markets exist
+games = ['GSWDEN', 'NYKOKC', 'HOUNOP', 'BOSKCHA', 'SACBKN', 'ORLTOR', 'PORWAS']
+for g in games:
+    try:
+        data = _signed_get(f'/trade-api/v2/markets?series_ticker=KXNBAGAME&limit=10&status=open')
+        markets = [m for m in data.get('markets',[]) if g in m.get('ticker','')]
+        if markets:
+            print(f'{g}: {markets[0][\"ticker\"]} yes_bid={markets[0][\"yes_bid_dollars\"]}')
+        else:
+            print(f'{g}: no market found')
+    except Exception as e:
+        print(f'{g}: error {e}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+cat > /root/kalshi-bot-v2/strategies/prop_nba.py << 'PYEOF'
+#!/usr/bin/env python3
+"""
+strategies/prop_nba.py
+─────────────────────────────────────────────────────────────────────────────
+NBA prop trading strategy for v2 bot.
+
+Uses the same edge-based model as the combo scanner but trades
+individual prop markets directly instead of parlays.
+
+Entry logic:
+    - Scan open NBA prop markets
+    - Score each using hit rate + season avg + injury filter
+    - Only trade legs with positive edge (model_conf > market_price)
+    - Minimum edge threshold to ensure quality
+    - One position per player per stat category
+    - Exit via existing TP/SL/time exit manager
+"""
+
+import logging
+from typing import Optional
+from core.models import Market, TradeSignal, Sport, Side
+from strategies.base import BaseStrategy, make_signal, calculate_contracts, calculate_ev
+from core.config import config
+
+log = logging.getLogger("kalshi_bot.strategy.prop_nba")
+
+# ── Config ─────────────────────────────────────────────────────────────────
+MIN_EDGE          = 0.08   # Minimum model_conf - market_price
+MIN_HIT_RATE      = 0.80   # Minimum last-10 hit rate
+MIN_MARKET_PRICE  = 0.55   # Skip legs below 55¢ (too risky)
+MAX_MARKET_PRICE  = 0.90   # Skip legs above 90¢ (too little payout)
+MIN_CONF          = 0.76   # Minimum model confidence
+
+PROP_SERIES = [
+    'KXNBAPTS', 'KXNBAREB', 'KXNBAAST',
+    'KXNBA3PT', 'KXNBASTL', 'KXNBABLK'
+]
+
+STAT_MAP = {
+    'KXNBAPTS': 'pts', 'KXNBAREB': 'reb', 'KXNBAAST': 'ast',
+    'KXNBA3PT': 'threes', 'KXNBASTL': 'stl', 'KXNBABLK': 'blk'
+}
+
+
+class NBAPropStrategy(BaseStrategy):
+    """
+    Trades individual NBA prop markets with positive edge.
+    Buys YES on props where our model confidence > market price.
+    """
+
+    name  = "prop_nba"
+    sport = Sport.NBA
+
+    def __init__(self):
+        super().__init__()
+        self._scanned_tickers = set()  # avoid re-evaluating same market
+
+    def evaluate(
+        self,
+        market: Market,
+        price_history: list,
+        context: Optional[dict] = None,
+    ) -> Optional[TradeSignal]:
+
+        ticker = market.ticker
+        series = ticker.split('-')[0]
+
+        # Only handle prop markets
+        if series not in PROP_SERIES:
+            return None
+
+        # Skip already evaluated
+        if ticker in self._scanned_tickers:
+            return None
+        self._scanned_tickers.add(ticker)
+
+        yes_bid = market.yes_bid
+        if not (MIN_MARKET_PRICE <= yes_bid <= MAX_MARKET_PRICE):
+            return None
+
+        # Score this prop
+        try:
+            from data.nba_stats import score_prop_leg
+            result = score_prop_leg(ticker)
+        except Exception as e:
+            log.debug(f"[PropNBA] Score failed {ticker}: {e}")
+            return None
+
+        conf = result.get('confidence', 0.0)
+        if conf < MIN_CONF:
+            return None
+
+        # Check for injury
+        if result.get('injured'):
+            return None
+
+        edge = conf - yes_bid
+        if edge < MIN_EDGE:
+            return None
+
+        # Check hit rate
+        reasoning = result.get('reason', '')
+        hit_rate = 0.0
+        if 'hr=' in reasoning:
+            try:
+                hr_str = reasoning.split('hr=')[1].split(')')[0].replace('%','')
+                hit_rate = float(hr_str) / 100.0
+            except Exception:
+                pass
+
+        if hit_rate < MIN_HIT_RATE and hit_rate > 0:
+            return None
+
+        # Build signal
+        yes_price  = int(yes_bid * 100)
+        balance    = context.get('balance', 20.0) if context else 20.0
+        contracts  = calculate_contracts(balance, yes_price)
+        ev         = calculate_ev(contracts, yes_price, conf)
+
+        if ev <= 0:
+            return None
+
+        player = reasoning.split(' avg')[0] if ' avg' in reasoning else ticker
+        stat   = STAT_MAP.get(series, 'stat')
+        thr    = ticker.split('-')[-1]
+
+        log.info(
+            f"[PropNBA] {player} {thr}+ {stat} YES @ {yes_price}c "
+            f"conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%}"
+        )
+
+        return make_signal(
+            market        = market,
+            side          = Side.YES,
+            price_cents   = yes_price,
+            contracts     = contracts,
+            strategy_name = self.name,
+            confidence    = conf,
+            reason        = f"{player} {thr}+ {stat} | conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%}",
+        )
+
+    def reset_cycle(self):
+        """Call at start of each bot cycle to allow re-evaluation."""
+        self._scanned_tickers.clear()
+PYEOF
+
+echo "Written — $(wc -l < /root/kalshi-bot-v2/strategies/prop_nba.py) lines"
+python3 -m py_compile strategies/prop_nba.py && echo "Syntax OK"
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/bot.py', 'r')
+c = f.read()
+f.close()
+
+# Add import
+old = 'from strategies.nba import NBAFade, NBAMomentumReversal'
+new = 'from strategies.nba import NBAFade, NBAMomentumReversal\nfrom strategies.prop_nba import NBAPropStrategy'
+c = c.replace(old, new)
+
+# Add to strategies list
+old2 = 'STRATEGIES = ['
+new2 = 'STRATEGIES = [\n    NBAPropStrategy(),'
+c = c.replace(old2, new2, 1)
+
+# Add prop series to fetcher
+old3 = 'NBA_SERIES    = ["KXNBAGAME"]'
+new3 = 'NBA_SERIES    = ["KXNBAGAME", "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT", "KXNBASTL", "KXNBABLK"]'
+c = c.replace(old3, new3)
+
+# Reset prop strategy each cycle
+old4 = '            markets = fetch_markets()'
+new4 = '            markets = fetch_markets()\n            # Reset prop strategy dedup cache each cycle\n            for s in STRATEGIES:\n                if hasattr(s, "reset_cycle"): s.reset_cycle()'
+c = c.replace(old4, new4)
+
+open('/root/kalshi-bot-v2/bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 -m py_compile bot.py && echo "Syntax OK"
+python3 -c "
+from bot import fetch_markets, STRATEGIES
+from core.models import Sport
+
+markets = fetch_markets()
+nba_props = [m for m in markets if any(s in m.ticker for s in ['KXNBAPTS','KXNBAREB','KXNBAAST','KXNBA3PT','KXNBASTL','KXNBABLK'])]
+print(f'Total markets: {len(markets)}')
+print(f'NBA prop markets: {len(nba_props)}')
+print(f'Strategies: {[s.name for s in STRATEGIES]}')
+
+# Test prop strategy on a few markets
+from strategies.prop_nba import NBAPropStrategy
+strat = NBAPropStrategy()
+signals = 0
+for m in nba_props[:20]:
+    sig = strat.evaluate(m, [], {'balance': 30.0})
+    if sig:
+        signals += 1
+        print(f'  SIGNAL: {sig.reason}')
+print(f'Signals from first 20 props: {signals}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats | grep -v Fetcher
+systemctl restart kalshi-bot-v2
+sleep 3
+systemctl status kalshi-bot-v2 | grep Active
+cd /root/kalshi-bot-v2 && python3 -c "
+import json, os
+from datetime import datetime
+
+trades = json.load(open('data/combo_trades.json'))
+print(f'Total combos placed: {len(trades)}')
+print(f'Total spent: \${len(trades)*5:.2f}')
+print()
+
+for i, t in enumerate(trades):
+    time    = t['time'][:16]
+    legs    = len(t.get('legs', []))
+    payout  = t.get('expected_payout', 0)
+    mode    = t.get('mode', 'unknown')
+    quote   = t.get('quote', {})
+    bid     = float(quote.get('yes_bid_dollars') or quote.get('_effective_yes') or 0)
+    actual_payout = 5.0 / bid if bid > 0 else 0
+    print(f'{i+1}. {time} | {mode:10s} | {legs} legs | model={payout:.1f}x | actual={actual_payout:.1f}x | bid=\${bid:.4f}')
+"
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+positions = pa.get_positions()
+combo_positions = [p for p in positions.market_positions 
+                   if 'MULTIGAME' in p.ticker or 'CROSSCATEGORY' in p.ticker]
+print(f'Open combo positions: {len(combo_positions)}')
+for p in combo_positions:
+    print(f'  {p.ticker[-40:]}')
+    print(f'  position={p.position} cost=\${p.total_cost:.2f} value=\${p.market_value:.2f}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+positions = pa.get_positions()
+print(dir(positions))
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+positions = pa.get_positions()
+all_pos = positions.positions or []
+combo_pos = [p for p in all_pos if 'MULTIGAME' in str(p) or 'CROSSCATEGORY' in str(p)]
+print(f'Total positions: {len(all_pos)}')
+print(f'Combo positions: {len(combo_pos)}')
+for p in combo_pos[:5]:
+    print(p)
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+
+# Get portfolio history
+history = pa.get_portfolio_history()
+print(type(history))
+print(dir(history))
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+# Check available methods
+methods = [m for m in dir(pa) if not m.startswith('_')]
+print(methods)
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+
+# Get settlements — shows resolved positions
+settlements = pa.get_settlements(limit=20)
+items = settlements.settlements or []
+print(f'Settlements: {len(items)}')
+for s in items:
+    ticker = getattr(s, 'market_ticker', '?')
+    revenue = getattr(s, 'revenue', 0)
+    pnl = getattr(s, 'profit_loss', getattr(s, 'pnl', '?'))
+    settled = getattr(s, 'settled_time', getattr(s, 'created_time', '?'))
+    if 'MULTIGAME' in str(ticker) or 'CROSSCATEGORY' in str(ticker):
+        print(f'  COMBO: {str(ticker)[-35:]} revenue=\${revenue} pnl={pnl}')
+    else:
+        print(f'  {str(ticker)[-35:]} revenue=\${revenue}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+settlements = pa.get_settlements(limit=5)
+items = settlements.settlements or []
+for s in items:
+    print(s)
+    print('---')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+settlements = pa.get_settlements(limit=50)
+items = settlements.settlements or []
+
+total_revenue = 0
+wins = 0
+losses = 0
+combos_won = []
+combos_lost = []
+
+for s in items:
+    ticker  = s.ticker or '?'
+    revenue = s.revenue or 0
+    total_revenue += revenue
+    is_combo = 'MULTIGAME' in ticker or 'CROSSCATEGORY' in ticker or 'MVECROSS' in ticker
+
+    if revenue > 0:
+        wins += 1
+        if is_combo:
+            combos_won.append((ticker[-30:], revenue))
+        else:
+            print(f'WIN:  {ticker[-35:]} +\${revenue/100:.2f}')
+    else:
+        losses += 1
+        if is_combo:
+            combos_lost.append(ticker[-30:])
+
+print(f'Total settlements: {len(items)}')
+print(f'Wins: {wins} | Losses: {losses}')
+print(f'Total revenue: \${total_revenue/100:.2f}')
+print(f'Combos won: {len(combos_won)}')
+for t, r in combos_won:
+    print(f'  {t} +\${r/100:.2f}')
+print(f'Combos lost: {len(combos_lost)}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 -c "
+# Revenue is in cents based on what we see
+# $99.68 total revenue from settlements
+# We spent $35 on 7 logged combos but there are clearly more combos from earlier
+
+# From settlements: 13 wins + 11 losses = 24 combo settlements
+# Revenue: $99.68
+
+# But we need to know cost basis
+# Each combo cost somewhere between $0.001 and $5
+
+revenue = 99.68
+print(f'Total revenue from combos: \${revenue:.2f}')
+
+# The manual combos you placed yourself
+manual_combos = [
+    ('4-leg', 2.20),
+    ('13-leg', 10.00),
+    ('10-leg', 2.97),  # 555 payout
+    ('10-leg', 5.00),  # 70 payout
+    ('31-leg', 5.97),
+    ('24-leg', 4.98),
+    ('10-leg', 9.91),
+    ('7-leg', 2.81),
+]
+manual_spent = sum(c[1] for c in manual_combos)
+print(f'Manual combos spent: \${manual_spent:.2f}')
+print(f'Bot combos spent: \$35.00')
+print(f'Total spent (est): \${manual_spent + 35:.2f}')
+print(f'Net PNL (est): \${revenue - manual_spent - 35:.2f}')
+print()
+print(f'Big winner: \$25 combo — what was that?')
+"
+python3 -c "
+import kalshi_python
+from core.kalshi_client import get_client, _signed_get
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+settlements = pa.get_settlements(limit=50)
+
+for s in settlements.settlements or []:
+    if (s.revenue or 0) >= 2000:  # $20+
+        ticker = s.ticker
+        print(f'Big winner: {ticker}')
+        print(f'Revenue: \${(s.revenue or 0)/100:.2f}')
+        print(f'Settled: {s.settled_time}')
+        # Try to get market details
+        try:
+            data = _signed_get(f'/trade-api/v2/markets/{ticker}')
+            m = data.get('market', {})
+            print(f'Title: {m.get(\"title\",\"?\")}')
+            print(f'Result: {m.get(\"result\",\"?\")}')
+        except:
+            pass
+        print()
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+cd /root/kalshi-bot-v2 && git add -A && git commit -m "feat: NBAPropStrategy live, combo PNL +\$20.84, system audit clean" && git push origin master
+cat > /root/kalshi-bot-v2/data/pnl_report.py << 'PYEOF'
+#!/usr/bin/env python3
+"""
+data/pnl_report.py
+─────────────────────────────────────────────────────────────────────────────
+Comprehensive PNL report using Kalshi settlements API.
+Covers combos, single props, and overall account performance.
+"""
+
+import logging
+import json
+import os
+from datetime import datetime, timezone
+from collections import defaultdict
+
+log = logging.getLogger("kalshi_bot.pnl")
+
+
+def get_full_pnl() -> dict:
+    """
+    Pull all settlements from Kalshi and compute comprehensive PNL.
+    Returns structured report dict.
+    """
+    from core.kalshi_client import get_client
+    import kalshi_python
+
+    client = get_client()
+    pa     = kalshi_python.PortfolioApi(api_client=client)
+
+    # Fetch all settlements (paginate)
+    all_settlements = []
+    cursor = None
+    while True:
+        try:
+            kwargs = {"limit": 100}
+            if cursor:
+                kwargs["cursor"] = cursor
+            resp = pa.get_settlements(**kwargs)
+            batch = resp.settlements or []
+            all_settlements.extend(batch)
+            cursor = resp.cursor
+            if not cursor or len(batch) < 100:
+                break
+        except Exception as e:
+            log.warning(f"Settlement fetch failed: {e}")
+            break
+
+    # Categorize
+    combos   = []
+    props    = []
+    games    = []
+    other    = []
+
+    for s in all_settlements:
+        ticker  = s.ticker or ''
+        revenue = (s.revenue or 0) / 100.0  # convert cents to dollars
+        settled = s.settled_time
+
+        entry = {
+            'ticker':   ticker,
+            'revenue':  round(revenue, 2),
+            'settled':  str(settled)[:16] if settled else '',
+            'won':      revenue > 0,
+        }
+
+        if 'MULTIGAME' in ticker or 'CROSSCATEGORY' in ticker:
+            combos.append(entry)
+        elif any(s in ticker for s in ['KXNBAPTS','KXNBAREB','KXNBAAST',
+                                        'KXNBA3PT','KXNBASTL','KXNBABLK']):
+            props.append(entry)
+        elif 'KXNBAGAME' in ticker or 'KXMLB' in ticker:
+            games.append(entry)
+        else:
+            other.append(entry)
+
+    def summarize(trades):
+        if not trades:
+            return {'n': 0, 'wins': 0, 'losses': 0, 'win_rate': 0,
+                    'revenue': 0, 'spent': 0, 'pnl': 0}
+        wins    = sum(1 for t in trades if t['won'])
+        revenue = sum(t['revenue'] for t in trades)
+        return {
+            'n':        len(trades),
+            'wins':     wins,
+            'losses':   len(trades) - wins,
+            'win_rate': round(wins / len(trades) * 100, 1),
+            'revenue':  round(revenue, 2),
+        }
+
+    # Load combo cost basis from trade log
+    combo_spent = 0.0
+    combo_log   = "/root/kalshi-bot-v2/data/combo_trades.json"
+    if os.path.exists(combo_log):
+        logged = json.load(open(combo_log))
+        combo_spent = len(logged) * 5.0  # $5 per bot combo
+
+    combo_summary = summarize(combos)
+    prop_summary  = summarize(props)
+    game_summary  = summarize(games)
+
+    # Best and worst trades
+    all_trades = combos + props + games + other
+    winners    = sorted([t for t in all_trades if t['won']],
+                        key=lambda x: x['revenue'], reverse=True)
+    losers     = sorted([t for t in all_trades if not t['won']],
+                        key=lambda x: x['revenue'])
+
+    total_revenue = sum(t['revenue'] for t in all_trades)
+
+    return {
+        'generated_at':  datetime.now(timezone.utc).isoformat()[:16],
+        'total_trades':  len(all_trades),
+        'total_revenue': round(total_revenue, 2),
+        'combos':        combo_summary,
+        'props':         prop_summary,
+        'games':         game_summary,
+        'top_winners':   winners[:3],
+        'recent':        sorted(all_trades, key=lambda x: x['settled'],
+                                reverse=True)[:5],
+    }
+
+
+def format_pnl_telegram(report: dict) -> str:
+    """Format PNL report for Telegram."""
+    lines = [
+        f"📊 *PNL Report*",
+        f"_{report['generated_at']} UTC_",
+        f"",
+        f"💰 *Total Revenue: ${report['total_revenue']:.2f}*",
+        f"Total Settled: {report['total_trades']} trades",
+        f"",
+    ]
+
+    c = report['combos']
+    if c['n']:
+        lines += [
+            f"🎯 *Combos*",
+            f"  {c['wins']}W / {c['losses']}L ({c['win_rate']}%) | Revenue: ${c['revenue']:.2f}",
+            f"",
+        ]
+
+    p = report['props']
+    if p['n']:
+        lines += [
+            f"🏀 *Props*",
+            f"  {p['wins']}W / {p['losses']}L ({p['win_rate']}%) | Revenue: ${p['revenue']:.2f}",
+            f"",
+        ]
+
+    g = report['games']
+    if g['n']:
+        lines += [
+            f"🏆 *Game Lines*",
+            f"  {g['wins']}W / {g['losses']}L ({g['win_rate']}%) | Revenue: ${g['revenue']:.2f}",
+            f"",
+        ]
+
+    if report['top_winners']:
+        lines.append(f"🥇 *Top Wins*")
+        for w in report['top_winners']:
+            lines.append(f"  +${w['revenue']:.2f} | {w['ticker'][-25:]}")
+
+    return "\n".join(lines)
+PYEOF
+
+echo "Written — $(wc -l < /root/kalshi-bot-v2/data/pnl_report.py) lines"
+python3 -c "
+from data.pnl_report import get_full_pnl, format_pnl_telegram
+report = get_full_pnl()
+print(format_pnl_telegram(report))
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
+c = f.read()
+f.close()
+
+old = '''    elif data == "stats":
+        try:
+            import csv
+            from collections import defaultdict
+
+            paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
+            v1_file    = "/root/trade_log.csv"
+            lines      = ["📊 *Trading Stats*\n"]
+
+            # V2 live stats
+            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"
+            if os.path.exists(v2_log):
+                rows = list(csv.DictReader(open(v2_log)))
+                total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
+                lines.append(f"*V2 Bot*")
+                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\\n")
+            else:
+                lines.append("*V2 Bot*\\nNo live trades yet\\n")
+
+            # V2 paper stats
+            if os.path.exists(paper_file):
+                rows     = list(csv.DictReader(open(paper_file)))
+                resolved = [r for r in rows if r.get('resolved','') not in ('','no')]
+                if resolved:
+                    wins    = sum(1 for r in resolved if float(r.get('hyp_pnl',0) or 0) > 0)
+                    pnl     = sum(float(r.get('hyp_pnl',0) or 0) for r in resolved)
+                    wr      = wins/len(resolved)*100
+                    lines.append(f"*V2 Paper*")
+                    lines.append(f"Resolved: {len(resolved)} | WR={wr:.0f}% | PNL=${pnl:+.2f}")
+                else:
+                    lines.append("*V2 Paper*\\nNo resolved trades yet")
+
+            # Combo stats
+            combo_file = "/root/kalshi-bot-v2/data/combo_trades.json"
+            if os.path.exists(combo_file):
+                import json as _json
+                combos = _json.load(open(combo_file))
+                spent  = len(combos) * 5.0
+                lines.append(f"\\n*Combos*\\nPlaced: {len(combos)} | Spent: ${spent:.0f}")
+
+            await query.edit_message_text(
+                "\\n".join(lines),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+            )'''
+
+new = '''    elif data == "stats":
+        await query.edit_message_text("📊 Loading PNL report...")
+        try:
+            from data.pnl_report import get_full_pnl, format_pnl_telegram
+            report = get_full_pnl()
+            msg    = format_pnl_telegram(report)
+            await query.edit_message_text(
+                msg,
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Refresh", callback_data="stats"),
+                    InlineKeyboardButton("🔙 Menu",    callback_data="menu")
+                ]])
+            )'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/api_server.py', 'r')
+c = f.read()
+f.close()
+
+old = '''@app.get("/api/stats")
+def get_stats(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    import csv
+    from collections import defaultdict
+
+    result = {}
+
+    # Paper trades v2
+    paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
+    if os.path.exists(paper_file):
+        rows     = list(csv.DictReader(open(paper_file)))
+        resolved = [r for r in rows if r.get('resolved','') not in ('','no')]
+        wins     = sum(1 for r in resolved if float(r.get('hyp_pnl',0) or 0) > 0)
+        pnl      = sum(float(r.get('hyp_pnl',0) or 0) for r in resolved)
+        result["paper"] = {
+            "total":    len(rows),
+            "resolved": len(resolved),
+            "wins":     wins,
+            "win_rate": round(wins/len(resolved)*100, 1) if resolved else 0,
+            "pnl":      round(pnl, 2)
+        }
+
+    # Combo stats
+    combo_file = "/root/kalshi-bot-v2/data/combo_trades.json"
+    if os.path.exists(combo_file):
+        combos = json.load(open(combo_file))
+        result["combos"] = {
+            "total":  len(combos),
+            "spent":  len(combos) * 5.0,
+        }
+
+    return result'''
+
+new = '''@app.get("/api/stats")
+def get_stats(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        from data.pnl_report import get_full_pnl
+        return get_full_pnl()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/api_server.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/app/index.html', 'r')
+c = f.read()
+f.close()
+
+old = '''async function loadStats() {
+  try {
+    const data = await api('/api/stats');
+    let html = '';
+    if (data.paper) {
+      const p = data.paper;
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">V2 Paper Trader</span>
+          <span class="badge ${p.pnl >= 0 ? 'badge-green' : 'badge-red'}">
+            $${p.pnl >= 0 ? '+' : ''}${p.pnl}
+          </span>
+        </div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${p.win_rate}%</span></div>
+        <div class="leg"><span class="leg-name">Resolved</span><span class="leg-conf">${p.resolved}/${p.total}</span></div>
+      </div>`;
+    }
+    if (data.combos) {
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">Combo Trades</span>
+          <span class="badge badge-purple">${data.combos.total} placed</span>
+        </div>
+        <div class="leg"><span class="leg-name">Total Spent</span><span class="leg-conf">$${data.combos.spent}</span></div>
+      </div>`;
+    }
+    document.getElementById('stats-content').innerHTML = html || '<div class="error">No stats yet</div>';
+  } catch(e) {
+    document.getElementById('stats-content').innerHTML =
+      '<div class="error">Error loading stats</div>';
+  }
+}'''
+
+new = '''async function loadStats() {
+  try {
+    const data = await api('/api/stats');
+    let html = '';
+
+    // Total revenue banner
+    const rev = data.total_revenue || 0;
+    html += `<div class="balance-card" style="margin:0 0 12px">
+      <div class="label">Total Revenue</div>
+      <div class="amount">$${rev.toFixed(2)}</div>
+      <div class="sub">${data.total_trades || 0} settled trades</div>
+    </div>`;
+
+    // Combos
+    const c = data.combos;
+    if (c && c.n) {
+      const pnl = c.revenue;
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">🎯 Combos</span>
+          <span class="badge ${pnl >= 0 ? 'badge-green' : 'badge-red'}">$${pnl.toFixed(2)}</span>
+        </div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${c.wins}W / ${c.losses}L</span></div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${c.win_rate}%</span></div>
+      </div>`;
+    }
+
+    // Props
+    const p = data.props;
+    if (p && p.n) {
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">🏀 Props</span>
+          <span class="badge ${p.revenue >= 0 ? 'badge-green' : 'badge-red'}">$${p.revenue.toFixed(2)}</span>
+        </div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${p.wins}W / ${p.losses}L</span></div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${p.win_rate}%</span></div>
+      </div>`;
+    }
+
+    // Game lines
+    const g = data.games;
+    if (g && g.n) {
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">🏆 Game Lines</span>
+          <span class="badge ${g.revenue >= 0 ? 'badge-green' : 'badge-red'}">$${g.revenue.toFixed(2)}</span>
+        </div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${g.wins}W / ${g.losses}L</span></div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${g.win_rate}%</span></div>
+      </div>`;
+    }
+
+    // Top winners
+    if (data.top_winners && data.top_winners.length) {
+      html += `<div class="card"><div class="card-header"><span class="card-title">🥇 Top Wins</span></div>`;
+      data.top_winners.forEach(w => {
+        html += `<div class="leg"><span class="leg-name">${w.ticker.slice(-20)}</span><span class="leg-conf">+$${w.revenue.toFixed(2)}</span></div>`;
+      });
+      html += `</div>`;
+    }
+
+    document.getElementById('stats-content').innerHTML = html || '<div class="error">No stats yet</div>';
+  } catch(e) {
+    document.getElementById('stats-content').innerHTML =
+      '<div class="error">Error: ' + e.message + '</div>';
+  }
+}'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/app/index.html', 'w').write(c)
+print("Done")
+PYEOF
+
+screen -S tgbot -X quit
+screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
+screen -S api -X quit  
+screen -S api bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && BOT_API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d"=" -f2) python3 api_server.py; exec bash'
+git add -A && git commit -m "feat: full PNL report from settlements API — Telegram + web app" && git push origin master
+cat > /root/kalshi-bot-v2/data/model_audit.py << 'PYEOF'
+#!/usr/bin/env python3
+"""
+data/model_audit.py
+─────────────────────────────────────────────────────────────────────────────
+Nightly model audit system.
+
+Compares model predictions vs actual outcomes to identify:
+- Which stat types the model over/underestimates
+- Which confidence ranges are actually profitable
+- Which players the model is consistently wrong on
+- Which edge thresholds work
+- Recommendations for confidence model adjustments
+
+Runs nightly, outputs JSON report + Telegram-formatted summary.
+Stores audit history in SQLite for trend tracking.
+"""
+
+import logging
+import json
+import os
+import sqlite3
+import time
+import requests as req
+from datetime import datetime, timezone, timedelta
+from collections import defaultdict
+
+log = logging.getLogger("kalshi_bot.model_audit")
+
+DB_PATH    = "/root/kalshi-bot-v2/data/cache.db"
+AUDIT_PATH = "/root/kalshi-bot-v2/data/audit_history.json"
+
+STAT_LABELS = {
+    'KXNBAPTS': 'points', 'KXNBAREB': 'rebounds',
+    'KXNBAAST': 'assists', 'KXNBA3PT': 'threes',
+    'KXNBASTL': 'steals',  'KXNBABLK': 'blocks',
+}
+
+
+# ── Data collection ────────────────────────────────────────────────────────
+
+def get_recent_prop_settlements(days: int = 7) -> list[dict]:
+    """
+    Get settled prop trades from Kalshi with their outcomes.
+    Cross-references with our confidence scores from cache.
+    """
+    from core.kalshi_client import get_client
+    import kalshi_python
+
+    client = get_client()
+    pa     = kalshi_python.PortfolioApi(api_client=client)
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    trades = []
+    cursor = None
+
+    while True:
+        try:
+            kwargs = {"limit": 100}
+            if cursor:
+                kwargs["cursor"] = cursor
+            resp  = pa.get_settlements(**kwargs)
+            batch = resp.settlements or []
+
+            for s in batch:
+                settled = s.settled_time
+                if settled and settled < cutoff:
+                    cursor = None
+                    break
+
+                ticker  = s.ticker or ''
+                series  = ticker.split('-')[0]
+
+                if series not in STAT_LABELS:
+                    continue
+
+                revenue = (s.revenue or 0) / 100.0
+                won     = revenue > 0
+
+                # Get our model's confidence score for this ticker
+                model_conf, market_price, edge, player, hit_rate = _get_model_data(ticker)
+
+                trades.append({
+                    'ticker':       ticker,
+                    'series':       series,
+                    'stat':         STAT_LABELS.get(series, '?'),
+                    'player':       player,
+                    'revenue':      round(revenue, 2),
+                    'won':          won,
+                    'model_conf':   model_conf,
+                    'market_price': market_price,
+                    'edge':         edge,
+                    'hit_rate':     hit_rate,
+                    'settled':      str(settled)[:10],
+                })
+
+            cursor = resp.cursor
+            if not cursor or not batch:
+                break
+
+        except Exception as e:
+            log.warning(f"Settlement fetch error: {e}")
+            break
+
+    return trades
+
+
+def _get_model_data(ticker: str) -> tuple:
+    """
+    Try to score the ticker with current model to get confidence.
+    Returns (model_conf, market_price, edge, player_name, hit_rate)
+    """
+    try:
+        from data.nba_stats import score_prop_leg
+        from core.kalshi_client import _signed_get
+
+        result = score_prop_leg(ticker)
+        conf   = result.get('confidence', 0)
+        player = result.get('player_name', ticker.split('-')[2][:10] if len(ticker.split('-')) > 2 else '?')
+        reason = result.get('reason', '')
+
+        # Extract hit rate
+        hit_rate = 0.0
+        if 'hr=' in reason:
+            try:
+                hr_str   = reason.split('hr=')[1].split(')')[0].replace('%','')
+                hit_rate = float(hr_str) / 100.0
+            except Exception:
+                pass
+
+        # Get market price
+        try:
+            data  = _signed_get(f'/trade-api/v2/markets/{ticker}')
+            price = float(data.get('market',{}).get('yes_bid_dollars', 0) or 0)
+        except Exception:
+            price = 0.0
+
+        edge = round(conf - price, 3)
+        return conf, price, edge, player, hit_rate
+
+    except Exception:
+        return 0.0, 0.0, 0.0, '?', 0.0
+
+
+# ── Analysis ───────────────────────────────────────────────────────────────
+
+def analyze_trades(trades: list[dict]) -> dict:
+    """
+    Analyze trade outcomes vs model predictions.
+    Returns comprehensive audit report.
+    """
+    if not trades:
+        return {'error': 'No trades to analyze'}
+
+    # By stat type
+    by_stat = defaultdict(lambda: {'n':0,'wins':0,'revenue':0.0,
+                                    'model_conf_sum':0.0,'hit_rate_sum':0.0})
+    for t in trades:
+        s = by_stat[t['stat']]
+        s['n']              += 1
+        s['wins']           += int(t['won'])
+        s['revenue']        += t['revenue']
+        s['model_conf_sum'] += t['model_conf']
+        s['hit_rate_sum']   += t['hit_rate']
+
+    stat_report = {}
+    for stat, d in by_stat.items():
+        actual_wr  = d['wins'] / d['n'] * 100 if d['n'] else 0
+        avg_conf   = d['model_conf_sum'] / d['n'] * 100 if d['n'] else 0
+        avg_hr     = d['hit_rate_sum'] / d['n'] * 100 if d['n'] else 0
+        calibration = actual_wr - avg_conf  # positive = model underestimates
+        stat_report[stat] = {
+            'n':           d['n'],
+            'wins':        d['wins'],
+            'actual_wr':   round(actual_wr, 1),
+            'avg_model_conf': round(avg_conf, 1),
+            'avg_hit_rate':   round(avg_hr, 1),
+            'calibration': round(calibration, 1),  # + means model is conservative
+            'revenue':     round(d['revenue'], 2),
+        }
+
+    # By edge bucket
+    edge_buckets = {
+        'negative':  {'range': (-99, 0),   'n':0,'wins':0},
+        'small':     {'range': (0, 0.05),  'n':0,'wins':0},
+        'medium':    {'range': (0.05,0.15),'n':0,'wins':0},
+        'large':     {'range': (0.15,0.25),'n':0,'wins':0},
+        'huge':      {'range': (0.25,99),  'n':0,'wins':0},
+    }
+    for t in trades:
+        edge = t['edge']
+        for name, b in edge_buckets.items():
+            lo, hi = b['range']
+            if lo <= edge < hi:
+                b['n']    += 1
+                b['wins'] += int(t['won'])
+                break
+
+    edge_report = {}
+    for name, b in edge_buckets.items():
+        wr = b['wins'] / b['n'] * 100 if b['n'] else 0
+        edge_report[name] = {
+            'n':      b['n'],
+            'wins':   b['wins'],
+            'win_rate': round(wr, 1),
+        }
+
+    # By confidence bucket
+    conf_buckets = defaultdict(lambda: {'n':0,'wins':0})
+    for t in trades:
+        conf = t['model_conf']
+        if conf >= 0.90:   bucket = '90-100%'
+        elif conf >= 0.80: bucket = '80-90%'
+        elif conf >= 0.70: bucket = '70-80%'
+        elif conf >= 0.60: bucket = '60-70%'
+        else:              bucket = '<60%'
+        conf_buckets[bucket]['n']    += 1
+        conf_buckets[bucket]['wins'] += int(t['won'])
+
+    conf_report = {}
+    for bucket, d in sorted(conf_buckets.items(), reverse=True):
+        wr = d['wins'] / d['n'] * 100 if d['n'] else 0
+        conf_report[bucket] = {
+            'n':        d['n'],
+            'wins':     d['wins'],
+            'win_rate': round(wr, 1),
+        }
+
+    # By player (min 3 trades)
+    by_player = defaultdict(lambda: {'n':0,'wins':0,'model_conf_sum':0.0})
+    for t in trades:
+        p = by_player[t['player']]
+        p['n']              += 1
+        p['wins']           += int(t['won'])
+        p['model_conf_sum'] += t['model_conf']
+
+    player_report = {}
+    for player, d in by_player.items():
+        if d['n'] < 3 or player == '?':
+            continue
+        actual_wr = d['wins'] / d['n'] * 100
+        avg_conf  = d['model_conf_sum'] / d['n'] * 100
+        diff      = actual_wr - avg_conf
+        player_report[player] = {
+            'n':        d['n'],
+            'wins':     d['wins'],
+            'actual_wr':   round(actual_wr, 1),
+            'model_conf':  round(avg_conf, 1),
+            'calibration': round(diff, 1),
+        }
+
+    # Generate recommendations
+    recommendations = _generate_recommendations(stat_report, edge_report,
+                                                 conf_report, player_report)
+
+    return {
+        'generated_at':  datetime.now(timezone.utc).isoformat()[:16],
+        'trade_count':   len(trades),
+        'date_range':    f"Last 7 days",
+        'by_stat':       stat_report,
+        'by_edge':       edge_report,
+        'by_confidence': conf_report,
+        'by_player':     dict(sorted(player_report.items(),
+                             key=lambda x: abs(x[1]['calibration']),
+                             reverse=True)[:10]),
+        'recommendations': recommendations,
+    }
+
+
+def _generate_recommendations(stat_r, edge_r, conf_r, player_r) -> list[str]:
+    """Generate specific actionable recommendations."""
+    recs = []
+
+    # Stat calibration
+    for stat, d in stat_r.items():
+        cal = d['calibration']
+        if d['n'] >= 5:
+            if cal < -15:
+                recs.append(f"❌ {stat}: Model overestimates by {abs(cal):.0f}% "
+                           f"(model {d['avg_model_conf']}% vs actual {d['actual_wr']}%) "
+                           f"— reduce {stat} confidence by 10-15%")
+            elif cal > 15:
+                recs.append(f"✅ {stat}: Model underestimates by {cal:.0f}% "
+                           f"— consider lowering {stat} edge threshold")
+
+    # Edge bucket analysis
+    for bucket, d in edge_r.items():
+        if d['n'] >= 5:
+            if bucket == 'negative' and d['win_rate'] > 50:
+                recs.append(f"⚠️ Negative edge trades winning {d['win_rate']}% "
+                           f"— edge calculation may need recalibration")
+            if bucket in ('large', 'huge') and d['win_rate'] < 40:
+                recs.append(f"⚠️ High edge trades ({bucket}) only winning {d['win_rate']}% "
+                           f"— market may be smarter than model thinks")
+
+    # Confidence calibration
+    for bucket, d in conf_r.items():
+        if d['n'] >= 5:
+            conf_val = float(bucket.split('-')[0].replace('%','').replace('<',''))
+            if d['win_rate'] < conf_val - 20:
+                recs.append(f"❌ {bucket} confidence: only {d['win_rate']}% actual win rate "
+                           f"— model is overconfident in this range")
+
+    # Player-specific
+    for player, d in list(player_r.items())[:3]:
+        cal = d['calibration']
+        if abs(cal) > 20 and d['n'] >= 3:
+            direction = "overestimates" if cal < 0 else "underestimates"
+            recs.append(f"🏀 {player}: Model {direction} by {abs(cal):.0f}% "
+                       f"({d['model_conf']}% model vs {d['actual_wr']}% actual)")
+
+    if not recs:
+        recs.append("✅ Model appears well calibrated — no major issues detected")
+
+    return recs
+
+
+# ── Formatting ─────────────────────────────────────────────────────────────
+
+def format_audit_telegram(report: dict) -> str:
+    """Format audit report for Telegram."""
+    if 'error' in report:
+        return f"❌ Audit error: {report['error']}"
+
+    lines = [
+        f"🔬 *Model Audit Report*",
+        f"_{report['generated_at']} UTC · {report['trade_count']} trades_",
+        f"",
+    ]
+
+    # Stat performance
+    lines.append("*By Stat Type:*")
+    for stat, d in sorted(report['by_stat'].items(),
+                          key=lambda x: x[1]['actual_wr'], reverse=True):
+        if d['n'] < 3:
+            continue
+        cal_str = f"{d['calibration']:+.0f}%" if d['calibration'] else ""
+        flag = "✅" if abs(d['calibration']) < 10 else "⚠️" if abs(d['calibration']) < 20 else "❌"
+        lines.append(f"{flag} {stat}: {d['actual_wr']}% WR "
+                    f"(model {d['avg_model_conf']}%) {cal_str}")
+    lines.append("")
+
+    # Edge buckets
+    lines.append("*By Edge Size:*")
+    for bucket, d in report['by_edge'].items():
+        if d['n'] < 2:
+            continue
+        lines.append(f"  {bucket}: {d['win_rate']}% WR ({d['n']} trades)")
+    lines.append("")
+
+    # Recommendations
+    lines.append("*Recommendations:*")
+    for rec in report['recommendations'][:5]:
+        lines.append(rec)
+
+    return "\n".join(lines)
+
+
+def save_audit(report: dict):
+    """Save audit to history file."""
+    history = []
+    if os.path.exists(AUDIT_PATH):
+        try:
+            history = json.load(open(AUDIT_PATH))
+        except Exception:
+            pass
+    history.append(report)
+    history = history[-30:]  # Keep last 30 audits
+    json.dump(history, open(AUDIT_PATH, 'w'), indent=2)
+
+
+def run_audit(days: int = 7) -> dict:
+    """Main entry point — run full audit."""
+    log.info("[Audit] Starting model audit...")
+    trades = get_recent_prop_settlements(days)
+    log.info(f"[Audit] Analyzing {len(trades)} trades")
+    report = analyze_trades(trades)
+    save_audit(report)
+    log.info("[Audit] Done")
+    return report
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
+    report = run_audit()
+    print(format_audit_telegram(report))
+PYEOF
+
+echo "Written — $(wc -l < /root/kalshi-bot-v2/data/model_audit.py) lines"
+python3 -m py_compile data/model_audit.py && echo "Syntax OK"
+cd /root/kalshi-bot-v2 && python3 data/model_audit.py 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+cd /root/kalshi-bot-v2 && python3 -m data.model_audit 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/data/model_audit.py', 'r')
+c = f.read()
+f.close()
+
+old = '''            for s in batch:
+                settled = s.settled_time
+                if settled and settled < cutoff:
+                    cursor = None
+                    break
+
+                ticker  = s.ticker or ''
+                series  = ticker.split('-')[0]
+
+                if series not in STAT_LABELS:
+                    continue'''
+
+new = '''            for s in batch:
+                settled = s.settled_time
+                ticker  = s.ticker or ''
+                series  = ticker.split('-')[0]
+
+                if series not in STAT_LABELS:
+                    continue
+
+                # Skip if older than cutoff
+                if settled and settled < cutoff:
+                    continue'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/data/model_audit.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 -m data.model_audit 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+python3 -c "
+from core.kalshi_client import get_client
+import kalshi_python
+
+client = get_client()
+pa = kalshi_python.PortfolioApi(api_client=client)
+resp = pa.get_settlements(limit=100)
+items = resp.settlements or []
+print(f'Total settlements: {len(items)}')
+
+series_count = {}
+for s in items:
+    ticker = s.ticker or ''
+    series = ticker.split('-')[0]
+    series_count[series] = series_count.get(series, 0) + 1
+
+for k,v in sorted(series_count.items(), key=lambda x: -x[1])[:15]:
+    print(f'  {k}: {v}')
+" 2>&1 | grep -v DEBUG | grep -v WARNING
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/data/model_audit.py', 'r')
+c = f.read()
+f.close()
+
+old = '''                if series not in STAT_LABELS:
+                    continue'''
+
+new = '''                # Include combos and game lines too
+                is_prop  = series in STAT_LABELS
+                is_combo = 'MULTIGAME' in ticker or 'CROSSCATEGORY' in ticker
+                is_game  = series in ('KXNBAGAME','KXNBASPREAD','KXMLBGAME','KXMLBSPREAD')
+
+                if not (is_prop or is_combo or is_game):
+                    continue
+
+                category = 'prop' if is_prop else 'combo' if is_combo else 'game'
+                stat     = STAT_LABELS.get(series, category)'''
+
+c = c.replace(old, new)
+
+# Also fix the trade dict to include category
+old2 = '''                trades.append({
+                    'ticker':       ticker,
+                    'series':       series,
+                    'stat':         STAT_LABELS.get(series, '?'),'''
+
+new2 = '''                trades.append({
+                    'ticker':       ticker,
+                    'series':       series,
+                    'stat':         stat,
+                    'category':     category,'''
+
+c = c.replace(old2, new2)
+open('/root/kalshi-bot-v2/data/model_audit.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 -m data.model_audit 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
+c = f.read()
+f.close()
+
+# Add audit button to menu
+old = '''        [InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],'''
+new = '''        [InlineKeyboardButton("🔬 Model Audit",  callback_data="audit"),
+         InlineKeyboardButton("🔄 Refresh",     callback_data="menu")],'''
+c = c.replace(old, new)
+
+# Add audit handler
+old2 = '''    elif data == "stats":'''
+new2 = '''    elif data == "audit":
+        await query.edit_message_text("🔬 Running model audit...")
+        try:
+            from data.model_audit import run_audit, format_audit_telegram
+            report = run_audit(days=7)
+            msg    = format_audit_telegram(report)
+            await query.edit_message_text(
+                msg, parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[
+                    InlineKeyboardButton("🔄 Refresh", callback_data="audit"),
+                    InlineKeyboardButton("🔙 Menu",    callback_data="menu")
+                ]])
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ Audit error: {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))
+
+    elif data == "stats":'''
+c = c.replace(old2, new2)
+open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scheduler.py', 'r')
+c = f.read()
+f.close()
+
+old = '''def main():
+    log.info("Combo Scheduler starting")
+    warm_cache()'''
+
+new = '''def run_nightly_audit():
+    """Run model audit and send results to Telegram."""
+    try:
+        from data.model_audit import run_audit, format_audit_telegram
+        from telegram_bot import send_telegram
+        log.info("Running nightly model audit...")
+        report = run_audit(days=7)
+        msg    = format_audit_telegram(report)
+        # Send via Telegram
+        from core.config import config
+        import requests
+        url = f"https://api.telegram.org/bot{config.TELEGRAM_BOT_TOKEN}/sendMessage"
+        requests.post(url, json={
+            "chat_id":    config.TELEGRAM_CHAT_ID,
+            "text":       msg,
+            "parse_mode": "Markdown"
+        }, timeout=8)
+        log.info("Nightly audit sent to Telegram")
+    except Exception as e:
+        log.warning(f"Nightly audit failed: {e}")
+
+
+def main():
+    log.info("Combo Scheduler starting")
+    warm_cache()
+    run_nightly_audit()'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/combo_scheduler.py', 'w').write(c)
+print("Done")
+PYEOF
+
+# Restart tgbot with new audit button
+screen -S tgbot -X quit
+screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
+git add -A && git commit -m "feat: model audit system — nightly calibration reports, Telegram button" && git push origin master
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
+c = f.read()
+f.close()
+
+old = '''    elif data == "positions":
+        try:
+            pos_file = "/root/kalshi-bot-v2/data/positions.json"
+            if os.path.exists(pos_file):
+                positions = json.load(open(pos_file))
+                if positions:
+                    lines = [f"📋 *Open Positions* ({len(positions)})\n"]
+                    for ticker, pos in list(positions.items())[:8]:
+                        entry = pos.get('entry_price', 0)
+                        lines.append(f"• {ticker[-20:]} @ {entry}¢")
+                    await query.edit_message_text(
+                        "\n".join(lines),
+                        parse_mode="Markdown",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+                    )
+                else:
+                    await query.edit_message_text(
+                        "📋 No open positions",
+                        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+                    )
+            else:
+                await query.edit_message_text(
+                    "📋 No open positions",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+                )
+        except Exception as e:
+            await query.edit_message_text(f"❌ {str(e)[:100]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))'''
+
+new = '''    elif data == "positions":
+        try:
+            import kalshi_python
+            from core.kalshi_client import get_client
+            client = get_client()
+            pa     = kalshi_python.PortfolioApi(api_client=client)
+            resp   = pa.get_positions()
+            all_pos = resp.positions or []
+
+            # Separate combos from single legs
+            combos  = [p for p in all_pos if 'MULTIGAME' in str(p.ticker) or 'CROSSCATEGORY' in str(p.ticker)]
+            singles = [p for p in all_pos if p not in combos]
+
+            lines = [f"📋 *Open Positions* ({len(all_pos)} total)\n"]
+
+            if combos:
+                lines.append(f"*🎯 Combos ({len(combos)})*")
+                for p in combos[:5]:
+                    cost  = getattr(p, 'total_cost', 0) or 0
+                    val   = getattr(p, 'market_value', 0) or 0
+                    lines.append(f"• {str(p.ticker)[-28:]} cost=${cost/100:.2f} val=${val/100:.2f}")
+                lines.append("")
+
+            if singles:
+                lines.append(f"*🏀 Single Props ({len(singles)})*")
+                for p in singles[:5]:
+                    cost = getattr(p, 'total_cost', 0) or 0
+                    lines.append(f"• {str(p.ticker)[-28:]} cost=${cost/100:.2f}")
+                lines.append("")
+
+            if not all_pos:
+                lines = ["📋 No open positions"]
+
+            await query.edit_message_text(
+                "\n".join(lines),
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]])
+            )
+        except Exception as e:
+            await query.edit_message_text(f"❌ {str(e)[:150]}",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Menu", callback_data="menu")]]))'''
+
+c = c.replace(old, new)
+open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
+print("Done")
+PYEOF
+
+screen -S tgbot -X quit
+screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'

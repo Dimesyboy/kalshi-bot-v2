@@ -50,10 +50,13 @@ class NBAPropStrategy(BaseStrategy):
 
     name  = "prop_nba"
     sport = Sport.NBA
+    MAX_TRADES_PER_SESSION = 4  # Hard cap per bot session
 
     def __init__(self):
         super().__init__()
-        self._scanned_tickers = set()  # avoid re-evaluating same market
+        self._scanned_tickers  = set()
+        self._session_trades   = 0
+        self._traded_players   = set()  # one trade per player per session
 
     def evaluate(
         self,
@@ -67,6 +70,10 @@ class NBAPropStrategy(BaseStrategy):
 
         # Only handle prop markets
         if series not in PROP_SERIES:
+            return None
+
+        # Hard cap — stop after MAX_TRADES_PER_SESSION
+        if self._session_trades >= self.MAX_TRADES_PER_SESSION:
             return None
 
         # Skip already evaluated
@@ -124,9 +131,17 @@ class NBAPropStrategy(BaseStrategy):
         stat   = STAT_MAP.get(series, 'stat')
         thr    = ticker.split('-')[-1]
 
+        # One trade per player per session
+        player_key = f"{player}_{stat}"
+        if player_key in self._traded_players:
+            return None
+        self._traded_players.add(player_key)
+        self._session_trades += 1
+
         log.info(
             f"[PropNBA] {player} {thr}+ {stat} YES @ {yes_price}c "
-            f"conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%}"
+            f"conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%} "
+            f"[{self._session_trades}/{self.MAX_TRADES_PER_SESSION}]"
         )
 
         return make_signal(
@@ -139,6 +154,13 @@ class NBAPropStrategy(BaseStrategy):
             reason        = f"{player} {thr}+ {stat} | conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%}",
         )
 
+    def reset_session(self):
+        """Call to reset session counters (e.g. new trading day)."""
+        self._scanned_tickers.clear()
+        self._session_trades  = 0
+        self._traded_players  = set()
+        log.info("[PropNBA] Session reset")
+
     def reset_cycle(self):
-        """Call at start of each bot cycle to allow re-evaluation."""
+        """Call at start of each bot cycle — only clears market cache."""
         self._scanned_tickers.clear()
