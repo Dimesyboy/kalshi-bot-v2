@@ -345,14 +345,23 @@ def run_bot():
             for m in markets:
                 price_history.update(m.ticker, int(m.yes_bid * 100))
 
-            # Use reconciler as source of truth for position counts
+            # Live position check directly from Kalshi — prevents spam
             signals_found= 0
             trades_placed= 0
-            total_exposure = reconciler.get_total_exposure()
+            try:
+                import kalshi_python as _kp
+                from core.kalshi_client import get_client as _gc
+                _pa = _kp.PortfolioApi(api_client=_gc())
+                _resting   = _pa.get_orders(status='resting')
+                _positions = _pa.get_positions()
+                live_exposure = (len(_resting.orders or []) +
+                                 len(_positions.positions or []))
+            except Exception:
+                live_exposure = reconciler.get_total_exposure()
 
-            # Skip trading if at position limit
-            if total_exposure >= config.MAX_OPEN_POSITIONS:
-                log.info(f"[Bot] At position limit ({total_exposure} exposure)")
+            MAX_PROP_POSITIONS = 15
+            if live_exposure >= MAX_PROP_POSITIONS:
+                log.info(f"[Bot] At position limit ({live_exposure}/15 exposure)")
             else:
                 context = {"balance": balance}
 

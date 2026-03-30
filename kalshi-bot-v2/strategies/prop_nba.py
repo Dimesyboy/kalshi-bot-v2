@@ -50,7 +50,16 @@ class NBAPropStrategy(BaseStrategy):
 
     name  = "prop_nba"
     sport = Sport.NBA
-    MAX_TRADES_PER_SESSION = 4  # Hard cap per bot session
+    MAX_TRADES_PER_SESSION = 4  # Default — overridden dynamically
+
+    @staticmethod
+    def get_max_trades(balance: float) -> int:
+        """Dynamic position limit based on bankroll."""
+        if balance < 15:   return 2
+        elif balance < 30: return 4
+        elif balance < 60: return 6
+        elif balance < 100: return 8
+        else:               return 10
 
     def __init__(self):
         super().__init__()
