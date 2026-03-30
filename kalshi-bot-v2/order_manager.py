@@ -180,27 +180,51 @@ class OrderManager:
             log.debug(f"[OrderManager] get_order {order_id[:8]} failed: {e}")
             return
 
-        status         = order.status          # resting, executed, canceled
-        count          = int(order.count or po["contracts"])
-        remaining      = int(order.remaining_count or 0)
-        # filled = total ordered minus remaining; on executed orders remaining is None
+        status    = order.status   # resting, executed, canceled
+        count     = int(order.count or po["contracts"])
+        remaining = int(order.remaining_count or 0) if order.remaining_count is not None else count
+
+        # Calculate actual filled contracts
         if status == "executed":
-            filled_count = count
-        else:
+            # executed means order is done — could be fully filled or cancelled
+            # Use count - remaining to get actual fills
             filled_count = max(0, count - remaining)
-        total          = po["contracts"]
+            # If remaining is None on executed, it was fully filled
+            if order.remaining_count is None:
+                filled_count = count
+        elif status == "canceled":
+            filled_count = max(0, count - remaining)
+        else:
+            # resting — partially filled
+            filled_count = max(0, count - remaining)
+
+        total = po["contracts"]
 
         log.debug(f"[OrderManager] {po['ticker']} order={order_id[:8]} "
-                  f"status={status} filled={filled_count}/{total}")
+                  f"status={status} count={count} remaining={remaining} "
+                  f"filled={filled_count}/{total}")
 
+        # Cancelled with no fills
         if status == "canceled" and filled_count == 0:
             self._handle_cancelled(order_id, po, "Cancelled on Kalshi")
             return
 
-        if filled_count > 0 and filled_count < total:
+        # Cancelled with partial fill — keep the partial position
+        if status == "canceled" and filled_count > 0:
+            self._handle_filled(order_id, po, filled_count)
+            return
+
+        # Partial fill — still resting
+        if filled_count > 0 and filled_count < total and status == "resting":
             self._handle_partial(order_id, po, filled_count)
 
-        if status == "executed" or (filled_count == total and total > 0):
+        # Fully filled
+        if status == "executed" and filled_count > 0:
+            self._handle_filled(order_id, po, filled_count)
+            return
+
+        # Fallback — count matches and executed
+        if filled_count >= total and total > 0:
             self._handle_filled(order_id, po, filled_count)
             return
 

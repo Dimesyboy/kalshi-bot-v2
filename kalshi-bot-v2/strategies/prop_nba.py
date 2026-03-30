@@ -205,5 +205,7 @@ class NBAPropStrategy(BaseStrategy):
         log.info("[PropNBA] Session reset")
 
     def reset_cycle(self):
-        """Call at start of each bot cycle — only clears market cache."""
+        """Call at start of each bot cycle — clears market cache and player dedup."""
         self._scanned_tickers.clear()
+        self._traded_players.clear()
+        self._session_trades = 0

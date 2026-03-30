@@ -1,1 +1,38 @@
-{}
+{
+  "b7928a45-2acd-4c70-8c94-dd0fc793fba2": {
+    "order_id": "b7928a45-2acd-4c70-8c94-dd0fc793fba2",
+    "ticker": "KXNBAREB-26MAR30BOSATL-ATLJJOHNSON1-6",
+    "event_ticker": "KXNBAREB-26MAR30BOSATL",
+    "side": "yes",
+    "strategy": "single_prop",
+    "reason": "Jalen Johnson 6+ reb | conf=0.93 edge=+0.08 hr=100% [SINGLE]",
+    "confidence": 0.932,
+    "entry_price": 85,
+    "contracts": 1,
+    "filled": 0,
+    "entry_fee": 0.01,
+    "state": "pending",
+    "placed_time": "2026-03-30T21:11:51.097139+00:00",
+    "close_time": "2026-04-13T23:30:00Z",
+    "market_status": "active",
+    "is_bot": true
+  },
+  "f7e699b0-6fec-49ab-b22b-f8cfb62dc83f": {
+    "order_id": "f7e699b0-6fec-49ab-b22b-f8cfb62dc83f",
+    "ticker": "KXNBAAST-26MAR30PHIMIA-MIATHERRO14-2",
+    "event_ticker": "KXNBAAST-26MAR30PHIMIA",
+    "side": "yes",
+    "strategy": "single_prop",
+    "reason": "Tyler Herro 2+ ast | conf=0.92 edge=+0.07 hr=93% [SINGLE]",
+    "confidence": 0.918,
+    "entry_price": 85,
+    "contracts": 1,
+    "filled": 0,
+    "entry_fee": 0.01,
+    "state": "pending",
+    "placed_time": "2026-03-30T21:11:52.314057+00:00",
+    "close_time": "2026-04-13T23:00:00Z",
+    "market_status": "active",
+    "is_bot": true
+  }
+}

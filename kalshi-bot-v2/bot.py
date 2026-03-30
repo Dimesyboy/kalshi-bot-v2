@@ -49,7 +49,7 @@ from data.cache import nba_cache, mlb_cache, tennis_cache
 from strategies.tennis import TennisFade
 from strategies.nba import NBAFade, NBAMomentumReversal
 from core.reconciler import reconciler
-from strategies.prop_nba import NBAPropStrategy
+from strategies.prop_router import PropRouterStrategy
 from strategies.mlb import MLBFade
 from strategies.cross_sport import ClosingLine
 from order_manager import OrderManager
@@ -59,7 +59,7 @@ from telegram import alert_trade, send_cycle_report, send_startup
 
 # ── Strategy registry ──────────────────────────────────────────────────────
 STRATEGIES = [
-    NBAPropStrategy(),
+    PropRouterStrategy(),
     TennisFade(),
     NBAFade(),
     NBAMomentumReversal(),
@@ -396,6 +396,18 @@ def run_bot():
                         if balance < trade_signal.price * trade_signal.contracts / 100.0:
                             log.warning(f"[Bot] Insufficient balance for {trade_signal.market_ticker}")
                             continue
+
+                        # Re-check live exposure before each order
+                        try:
+                            _r2 = _pa.get_orders(status='resting')
+                            _p2 = _pa.get_positions()
+                            live_exposure = (len(_r2.orders or []) +
+                                            len(_p2.positions or []))
+                            if live_exposure >= MAX_PROP_POSITIONS:
+                                log.info(f"[Bot] Exposure limit reached mid-cycle ({live_exposure}/15)")
+                                break
+                        except Exception:
+                            pass
 
                         client_order_id = str(uuid.uuid4())
                         order_id = place_order(
