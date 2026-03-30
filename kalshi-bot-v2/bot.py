@@ -48,6 +48,7 @@ from data.tennis import get_live_matches
 from data.cache import nba_cache, mlb_cache, tennis_cache
 from strategies.tennis import TennisFade
 from strategies.nba import NBAFade, NBAMomentumReversal
+from strategies.prop_nba import NBAPropStrategy
 from strategies.mlb import MLBFade
 from strategies.cross_sport import ClosingLine
 from order_manager import OrderManager
@@ -57,6 +58,7 @@ from telegram import alert_trade, send_cycle_report, send_startup
 
 # ── Strategy registry ──────────────────────────────────────────────────────
 STRATEGIES = [
+    NBAPropStrategy(),
     TennisFade(),
     NBAFade(),
     NBAMomentumReversal(),
@@ -65,7 +67,7 @@ STRATEGIES = [
 ]
 
 # ── Series tickers to fetch ────────────────────────────────────────────────
-NBA_SERIES    = ["KXNBAGAME"]
+NBA_SERIES    = ["KXNBAGAME", "KXNBAPTS", "KXNBAREB", "KXNBAAST", "KXNBA3PT", "KXNBASTL", "KXNBABLK"]
 MLB_SERIES    = ["KXMLBGAME"]
 TENNIS_SERIES = [
     "KXATPMATCH", "KXWTAMATCH",
@@ -334,6 +336,9 @@ def run_bot():
 
             # Fetch markets
             markets = fetch_markets()
+            # Reset prop strategy dedup cache each cycle
+            for s in STRATEGIES:
+                if hasattr(s, "reset_cycle"): s.reset_cycle()
 
             # Update price history
             for m in markets:

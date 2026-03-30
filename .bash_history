@@ -1,1103 +1,3 @@
-    warm_cache()
-    log.info("Fetching today's NBA schedule...")'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/combo_scheduler.py', 'w').write(c)
-print("Done")
-PYEOF
-
-git add combo_scheduler.py && git commit -m "feat: auto cache warm on scheduler startup" && git push origin master
-screen -S combo -X quit
-screen -S combo bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py; exec bash'
-screen -ls && /root/kalshi-bot/bin/python3 -c "from data.persistent_cache import cache_stats; cache_stats()"
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py
-python3 telegram_bot.py
-soururce kalshi-bot/bin/activate
-source /root/kalshi-bot/bin/activate
-screen -ls
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
-c = f.read()
-f.close()
-
-# Fix stats to show v2 not v1
-c = c.replace(
-    'v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"',
-    'v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"  # v2 trades'
-)
-c = c.replace(
-    '"*V2 Bot (live)*"',
-    '"*V2 Bot*"'
-)
-
-# Fix /menu command — it's triggering positions instead of menu
-# The issue is cmd_menu sends wrong initial message
-old = '''async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 *Kalshi Bot v2*",
-        parse_mode="Markdown",
-        reply_markup=main_menu_keyboard()
-    )'''
-
-new = '''async def cmd_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 *Kalshi Bot v2* — What would you like to do?",
-        parse_mode="Markdown",
-        reply_markup=main_menu_keyboard()
-    )'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/bot.py', 'r')
-c = f.read()
-f.close()
-c = c.replace(
-    'if cycle % 10 == 0:',
-    'if cycle % 50 == 0:'
-)
-open('/root/kalshi-bot-v2/bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-screen -S tgbot -X quit
-screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
-systemctl restart kalshi-bot-v2
-git add -A && git commit -m "fix: menu command, cycle report frequency, stats v2" && git push origin master
-screen -ls | grep tgbot
-screen -r tgbot
-grep -A 15 "elif data == \"stats\":" /root/kalshi-bot-v2/telegram_bot.py | head -20
-cd /root/kalshi-bot-v2
-python3 << 'PYEOF'
-f = open('telegram_bot.py', 'r')
-c = f.read()
-f.close()
-
-old = '''            # V1 live stats
-            if os.path.exists(v1_file):
-                rows = list(csv.DictReader(open(v1_file)))
-                total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
-                lines.append(f"*V1 Bot (live)*")
-                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\n")'''
-
-new = '''            # V2 live stats
-            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"
-            if os.path.exists(v2_log):
-                rows = list(csv.DictReader(open(v2_log)))
-                total_pnl = sum(float(r.get('pnl',0) or 0) for r in rows)
-                lines.append(f"*V2 Bot*")
-                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\\n")
-            else:
-                lines.append("*V2 Bot*\\nNo live trades yet\\n")'''
-
-c = c.replace(old, new)
-open('telegram_bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-screen tgbot -r
-screen -r
-screen -r tgbot
-grep "V2 Bot\|v2_log\|V1 Bot" /root/kalshi-bot-v2/telegram_bot.py | head -5
-cd /root/kalshi-bot-v2
-grep -n "V1 Bot\|v1_file\|V2 Bot\|v2_log" telegram_bot.py | head -10
-sed -n '220,240p' /root/kalshi-bot-v2/telegram_bot.py
-python3 << 'PYEOF'
-with open('/root/kalshi-bot-v2/telegram_bot.py', 'r') as f:
-    lines = f.readlines()
-
-new_lines = []
-skip_until = None
-i = 0
-while i < len(lines):
-    line = lines[i]
-    if '            v1_file    = "/root/trade_log.csv"' in line:
-        # Replace the whole V1 block
-        new_lines.append('            v2_log = "/root/kalshi-bot-v2/data/trade_log.csv"\n')
-        i += 1
-        continue
-    elif '            # V1 live stats' in line:
-        # Skip V1 block, replace with V2
-        new_lines.append('            # V2 live stats\n')
-        new_lines.append('            if os.path.exists(v2_log):\n')
-        new_lines.append('                rows = list(csv.DictReader(open(v2_log)))\n')
-        new_lines.append('                total_pnl = sum(float(r.get(\'pnl\',0) or 0) for r in rows)\n')
-        new_lines.append('                lines.append(f"*V2 Bot*")\n')
-        new_lines.append('                lines.append(f"Trades: {len(rows)} | PNL: ${total_pnl:+.2f}\\n")\n')
-        new_lines.append('            else:\n')
-        new_lines.append('                lines.append("*V2 Bot*\\nNo live trades yet\\n")\n')
-        # Skip old V1 lines until V2 paper stats
-        i += 1
-        while i < len(lines) and '# V2 paper stats' not in lines[i]:
-            i += 1
-        continue
-    else:
-        new_lines.append(line)
-    i += 1
-
-with open('/root/kalshi-bot-v2/telegram_bot.py', 'w') as f:
-    f.writelines(new_lines)
-print("Done")
-PYEOF
-
-grep -n "V1 Bot\|V2 Bot\|v2_log" /root/kalshi-bot-v2/telegram_bot.py | head -5
-screen -r tgbot
-grep -n "positions" /root/kalshi-bot-v2/telegram_bot.py | grep -i "path\|file\|json"
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/telegram_bot.py', 'r')
-c = f.read()
-f.close()
-c = c.replace(
-    '"📋 No positions file found"',
-    '"📋 No open positions"'
-)
-open('/root/kalshi-bot-v2/telegram_bot.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 telegram_bot.py &
-git add -A && git commit -m "fix: stats v2, positions message, menu buttons" && git push origin master
-pkill -f telegram_bot.py
-sleep 2
-screen -S tgbot -X quit
-screen -S tgbot bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 telegram_bot.py; exec bash'
-source /root/kalshi-bot/bin/activate &&
-source /root/kalshi-bot/bin/activate
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && echo "=== V2 BOT ===" && systemctl status kalshi-bot-v2 | grep Active && echo "" && echo "=== BALANCE ===" && python3 -c "from core.kalshi_client import get_balance; print(f'\${get_balance():.2f}')" && echo "" && echo "=== V2 PAPER STATS ===" && python3 paper_trader.py --stats && echo "" && echo "=== V1 PAPER STATS ===" && cd /root && python3 paper_trader.py --stats
-screen -r combo
-screen -r paper-v2
-cd /root/kalshi-bot-v2 && python3 << 'PYEOF'
-f = open('combo_scanner.py', 'r')
-c = f.read()
-f.close()
-c = c.replace(
-    '            yes_q = [q for q in qs if float(q.get(\'yes_bid_dollars\',0) or 0) >= 0.02 and q.get(\'status\')==\'open\']',
-    '            yes_q = [q for q in qs if float(q.get(\'yes_bid_dollars\',0) or 0) >= 0.05 and q.get(\'status\')==\'open\']'
-)
-open('combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-git add -A && git commit -m "fix: min quote 5c to avoid resting orders at garbage prices" && git push origin master
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 -c "
-from data.nba_stats import score_prop_leg
-
-legs = [
-    ('Kawhi Leonard 2+ threes',   'KXNBA3PT-26MAR29LACMIL-LACKLEONARD2-2'),
-    ('Darius Garland 6+ assists', 'KXNBAAST-26MAR29LACMIL-LACDGARLAND10-6'),
-    ('John Collins 10+ points',   'KXNBAPTS-26MAR29LACMIL-LACJCOLLINS20-10'),
-    ('Kawhi Leonard 25+ points',  'KXNBAPTS-26MAR29LACMIL-LACKLEONARD2-25'),
-    ('Myles Turner 10+ points',   'KXNBAPTS-26MAR29LACMIL-LACMTURNER33-10'),
-    ('Mathurin 2+ rebounds',      'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2'),
-    ('John Collins 4+ rebounds',  'KXNBAREB-26MAR29LACMIL-LACJCOLLINS20-4'),
-    ('Tyler Herro 2+ threes',     'KXNBA3PT-26MAR29MIAIND-MIATHERRO14-2'),
-    ('Wiggins 10+ points',        'KXNBAPTS-26MAR29MIAIND-MIAAWIGGINS22-10'),
-    ('Adebayo 15+ points',        'KXNBAPTS-26MAR29MIAIND-MIABADEBAYO13-15'),
-    ('Kel el Ware 6+ rebounds',   'KXNBAREB-26MAR29MIAIND-INDKWARE5-6'),
-    ('Desmond Bane 2+ threes',    'KXNBA3PT-26MAR29ORLTORR-TORDBANEE0-2'),
-    ('DeRozan 2+ assists',        'KXNBAAST-26MAR29SACBKN-SACDDEROZA0-2'),
-    ('Noah Clowney 10+ points',   'KXNBAPTS-26MAR29SACBKN-BKNNCLOWNEY0-10'),
-    ('DeRozan 15+ points',        'KXNBAPTS-26MAR29SACBKN-SACDDEROZA0-15'),
-    ('Nic Claxton 2+ rebounds',   'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2'),
-    ('Knueppel 15+ points',       'KXNBAPTS-26MAR29BOSCHA-CHAKKNUEPPEL7-15'),
-    ('LaMelo 15+ points',         'KXNBAPTS-26MAR29BOSCHA-CHALBALL1-15'),
-    ('Miles Bridges 10+ points',  'KXNBAPTS-26MAR29BOSCHA-CHAMBRIDGES8-10'),
-    ('Aaron Gordon 10+ points',   'KXNBAPTS-26MAR30GSDEN-DENAGORDON15-10'),
-    ('Jokic 20+ points',          'KXNBAPTS-26MAR30GSDEN-DENNJOKIC15-20'),
-]
-
-from functools import reduce
-total_conf = 1.0
-print(f'{\"Leg\":<28} {\"Avg\":>5} {\"Thr\":>4} {\"HR\":>5} {\"Conf\":>6}')
-print('-'*55)
-for name, ticker in legs:
-    try:
-        r = score_prop_leg(ticker)
-        conf = r.get('confidence', 0)
-        avg  = r.get('avg_stat', 0)
-        thr  = r.get('threshold', 0)
-        hr_str = ''
-        if 'hr=' in r.get('reason',''):
-            hr_str = r['reason'].split('hr=')[1].split(')')[0]
-        total_conf *= conf if conf > 0 else 0.5
-        flag = ' ⚠️' if conf < 0.65 else ' ✅'
-        print(f'{name:<28} {avg:>5.1f} {thr:>4.0f} {hr_str:>5} {conf:>6.2f}{flag}')
-    except Exception as e:
-        print(f'{name:<28} ERROR')
-print('-'*55)
-print(f'Combined model conf: {total_conf:.4f} = {total_conf*100:.2f}%')
-print(f'Market implied prob: {4.97/1162*100:.2f}%')
-print(f'EV ratio: {(total_conf * 1162/4.97):.2f}x')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-cd /root/kalshi-bot-v2 && python3 -c "
-from data.nba_stats import _parse_ticker, _cached_find_player, TEAM_CODE_MAP
-
-tickers = [
-    'KXNBAPTS-26MAR29LACMIL-LACMTURNER33-10',
-    'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2',
-    'KXNBAREB-26MAR29MIAIND-INDKWARE5-6',
-    'KXNBA3PT-26MAR29ORLTORR-TORDBANEE0-2',
-    'KXNBAAST-26MAR29SACBKN-SACDDEROZA0-2',
-    'KXNBAPTS-26MAR29SACBKN-BKNNCLAXTONN0-10',
-    'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2',
-]
-for t in tickers:
-    parsed = _parse_ticker(t)
-    if parsed:
-        team, code = parsed
-        espn_team = TEAM_CODE_MAP.get(team, team)
-        espn_id, name = _cached_find_player(espn_team, code)
-        print(f'{t[-22:]} → team={team} espn={espn_team} code={code} found={name}')
-    else:
-        print(f'{t[-22:]} → PARSE FAILED')
-" 2>&1 | grep -v DEBUG | grep -v WARNING
-python3 -c "
-import requests
-checks = [
-    ('LAC', ['turner', 'mathurin']),
-    ('IND', ['mathurin', 'ware']),
-    ('TOR', ['bane']),
-    ('SAC', ['derozan']),
-    ('BKN', ['claxton']),
-]
-for team, names in checks:
-    r = requests.get(f'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/teams/{team}/roster', timeout=6)
-    athletes = r.json().get('athletes', [])
-    for a in athletes:
-        last = a.get('lastName','').lower()
-        if any(n in last for n in names):
-            print(f'{team}: {a[\"fullName\"]} id={a[\"id\"]} last={last}')
-" 2>&1 | grep -v DEBUG
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/data/nba_stats.py', 'r')
-c = f.read()
-f.close()
-
-old = '''        # Reverse partial — last name contains player code fragment
-        if len(code) >= 4 and code[:4] in last:
-            return (athlete['id'], full)'''
-
-new = '''        # Reverse partial — last name contains player code fragment
-        if len(code) >= 4 and code[:4] in last:
-            return (athlete['id'], full)
-
-        # Handle double-letter codes e.g. nclaxtonn -> claxton
-        stripped = code.rstrip(code[-1]) if code else code
-        if len(stripped) >= 4 and (stripped in last or last in stripped):
-            return (athlete['id'], full)
-
-        # Handle missing vowels / truncation e.g. dderoza -> derozan
-        if len(code) >= 5 and (code[1:] in last or last in code[1:]):
-            return (athlete['id'], full)'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/data/nba_stats.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "
-from data.nba_stats import score_prop_leg
-
-tests = [
-    ('DeRozan 15+ pts',    'KXNBAPTS-26MAR29SACBKN-SACDDEROZA0-15'),
-    ('Claxton 2+ reb',     'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2'),
-    ('Mathurin 2+ reb',    'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2'),
-    ('Turner 10+ pts',     'KXNBAPTS-26MAR29LACMIL-LACMTURNER33-10'),
-]
-for name, ticker in tests:
-    r = score_prop_leg(ticker)
-    print(f'{name}: conf={r[\"confidence\"]:.2f} avg={r.get(\"avg_stat\",0):.1f} | {r[\"reason\"][:50]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-from data.nba_stats import _find_player
-
-# Test each directly
-tests = [
-    ('SAC', 'dderoza'),
-    ('BKN', 'nclaxtonn'),
-    ('IND', 'bmathurin'),
-    ('LAC', 'mturner'),
-]
-for team, code in tests:
-    result = _find_player(team, code)
-    print(f'{team} {code}: {result}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING
-grep -n "return None\|return (None" /root/kalshi-bot-v2/data/nba_stats.py | head -20
-sed -n '75,85p' /root/kalshi-bot-v2/data/nba_stats.py
-python3 -c "
-import re
-tickers = [
-    'KXNBAPTS-26MAR29SACBKN-SACDDEROZA0-15',
-    'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2',
-    'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2',
-]
-for t in tickers:
-    m = re.search(r'-([A-Z]{3})([A-Z]+)(\d+)-(\d+)$', t)
-    if m:
-        print(f'{t[-25:]} → team={m.group(1)} player={m.group(2)} num={m.group(3)} thr={m.group(4)}')
-    else:
-        print(f'{t[-25:]} → NO MATCH')
-"
-python3 -c "
-from data.persistent_cache import get_roster
-from data.nba_stats import TEAM_CODE_MAP
-
-# Check SAC roster for derozan
-roster = get_roster('SAC')
-print(f'SAC roster size: {len(roster)}')
-code = 'dderoza'
-for a in roster:
-    last = a.get('lastName','').lower().replace('-','').replace(\"'\",'')
-    full = a.get('fullName','')
-    if 'dero' in last or 'dero' in code:
-        print(f'  Candidate: last={last} full={full}')
-        print(f'    endswith: {code.endswith(last)}')
-        print(f'    last in code: {last in code}')
-        print(f'    last[:4] in code: {last[:4] in code}')
-        print(f'    code[1:] in last: {code[1:] in last}')
-"
-grep -n "stripped\|code\[1:\]\|rstrip" /root/kalshi-bot-v2/data/nba_stats.py | head -10
-python3 -c "
-from data.persistent_cache import get_roster
-
-roster = get_roster('SAC')
-for a in roster:
-    raw_last = a.get('lastName', '')
-    cleaned  = raw_last.lower().replace('-','').replace(\"'\",'')
-    if 'dero' in cleaned:
-        print(f'raw={raw_last!r} cleaned={cleaned!r}')
-        code = 'dderoza'
-        print(f'last[:4]={cleaned[:4]!r} in code={cleaned[:4] in code}')
-        print(f'code[1:]={code[1:]!r} in last={code[1:] in cleaned}')
-"
-python3 -c "
-import sqlite3, json
-conn = sqlite3.connect('/root/kalshi-bot-v2/data/cache.db')
-row = conn.execute('SELECT data FROM rosters WHERE team=\"SAC\"').fetchone()
-roster = json.loads(row[0])
-for a in roster:
-    if 'dero' in a.get('lastName','').lower():
-        import json as j
-        print(j.dumps(a, indent=2)[:300])
-"
-python3 -c "
-from data.persistent_cache import get_roster
-
-espn_team = 'SAC'
-player_code = 'dderoza'
-
-roster = get_roster(espn_team, max_age_secs=86400)
-print(f'Roster size: {len(roster)}')
-
-code = player_code.replace('-','').replace(\"'\",'')
-for athlete in roster:
-    last = athlete.get('lastName', '').lower().replace('-','').replace(\"'\",'')
-    full = athlete.get('fullName', '')
-    
-    c1 = code.endswith(last)
-    c2 = last in code
-    c3 = len(last) >= 4 and last[:4] in code
-    c4 = len(code) >= 4 and code[:4] in last
-    
-    if any([c1,c2,c3,c4]):
-        print(f'MATCH: {full} last={last}')
-        print(f'  c1={c1} c2={c2} c3={c3} c4={c4}')
-        break
-" 2>&1 | grep -v DEBUG
-sed -n '85,175p' /root/kalshi-bot-v2/data/nba_stats.py
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/data/nba_stats.py', 'r')
-c = f.read()
-f.close()
-
-old = '''        except Exception as e:
-            log.warning(f"[NBAStats] Roster fetch failed {espn_team}: {e}")
-            return (None, None)
-
-
-def _cached_find_player(espn_team: str, player_code: str) -> tuple:
-    """Wrapper around _find_player with persistent ID caching."""
-    key = f"{espn_team}_{player_code}"
-    espn_id, full_name = get_player_id(key)
-    if espn_id:
-        return espn_id, full_name
-    result = _find_player(espn_team, player_code)
-    if result is None:
-        return (None, None)
-    espn_id, full_name = result
-    if espn_id:
-        set_player_id(key, espn_id, full_name)
-    return espn_id, full_name
-
-    # Match player_code against last names
-    for athlete in roster:'''
-
-new = '''        except Exception as e:
-            log.warning(f"[NBAStats] Roster fetch failed {espn_team}: {e}")
-            return (None, None)
-
-    # Match player_code against last names
-    for athlete in roster:'''
-
-c = c.replace(old, new)
-
-# Now add _cached_find_player after _find_player's closing return
-old2 = '''    return (None, None)
-
-
-def get_injury_status'''
-
-new2 = '''    return (None, None)
-
-
-def _cached_find_player(espn_team: str, player_code: str) -> tuple:
-    """Wrapper around _find_player with persistent ID caching."""
-    key = f"{espn_team}_{player_code}"
-    espn_id, full_name = get_player_id(key)
-    if espn_id:
-        return espn_id, full_name
-    result = _find_player(espn_team, player_code)
-    if result is None:
-        return (None, None)
-    espn_id, full_name = result
-    if espn_id:
-        set_player_id(key, espn_id, full_name)
-    return espn_id, full_name
-
-
-def get_injury_status'''
-
-c = c.replace(old2, new2, 1)
-open('/root/kalshi-bot-v2/data/nba_stats.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "
-from data.nba_stats import score_prop_leg
-tests = [
-    ('DeRozan 15+ pts',   'KXNBAPTS-26MAR29SACBKN-SACDDEROZA0-15'),
-    ('Claxton 2+ reb',    'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2'),
-    ('Mathurin 2+ reb',   'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2'),
-]
-for name, ticker in tests:
-    r = score_prop_leg(ticker)
-    print(f'{name}: conf={r[\"confidence\"]:.2f} avg={r.get(\"avg_stat\",0):.1f} | {r[\"reason\"][:55]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-git add -A && git commit -m "fix: _find_player matching code was outside function scope — major bug fix" && git push origin master
-python3 -c "
-from data.prop_scanner import scan_edges, build_edge_combo
-from functools import reduce
-import time
-
-t0 = time.time()
-legs = scan_edges()
-combo = build_edge_combo(legs)
-print(f'Scan: {time.time()-t0:.1f}s | {len(legs)} edge legs')
-if combo:
-    payout = 1/reduce(lambda a,b: a*b, [l[\"market_price\"] for l in combo], 1.0)
-    avg_edge = sum(l[\"edge\"] for l in combo)/len(combo)
-    print(f'Combo: {len(combo)} legs | {payout:.1f}x | avg edge={avg_edge:+.3f} | \$5->\${5*payout:.0f}')
-    for l in combo:
-        print(f'  edge={l[\"edge\"]:+.3f} mkt={l[\"market_price\"]:.2f} | {l[\"reasoning\"][:60]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-cd /root/kalshi-bot-v2 && python3 -c "
-from data.nba_stats import score_prop_leg
-
-legs = [
-    ('Kawhi 2+ threes',      'KXNBA3PT-26MAR29LACMIL-LACKLEONARD2-2'),
-    ('Garland 6+ assists',   'KXNBAAST-26MAR29LACMIL-LACDGARLAND10-6'),
-    ('Collins 10+ pts',      'KXNBAPTS-26MAR29LACMIL-LACJCOLLINS20-10'),
-    ('Kawhi 25+ pts',        'KXNBAPTS-26MAR29LACMIL-LACKLEONARD2-25'),
-    ('Turner 10+ pts',       'KXNBAPTS-26MAR29LACMIL-LACMTURNER33-10'),
-    ('Mathurin 2+ reb',      'KXNBAREB-26MAR29LACMIL-INDBMATHURIN9-2'),
-    ('Collins 4+ reb',       'KXNBAREB-26MAR29LACMIL-LACJCOLLINS20-4'),
-    ('Herro 2+ threes',      'KXNBA3PT-26MAR29MIAIND-MIATHERRO14-2'),
-    ('Wiggins 10+ pts',      'KXNBAPTS-26MAR29MIAIND-MIAAWIGGINS22-10'),
-    ('Adebayo 15+ pts',      'KXNBAPTS-26MAR29MIAIND-MIABADEBAYO13-15'),
-    ('Kel el Ware 6+ reb',   'KXNBAREB-26MAR29MIAIND-INDKWARE5-6'),
-    ('Bane 2+ threes',       'KXNBA3PT-26MAR29ORLTORR-TORDBANEE0-2'),
-    ('DeRozan 2+ ast',       'KXNBAAST-26MAR29SACBKN-SACDDEROZA0-2'),
-    ('Clowney 10+ pts',      'KXNBAPTS-26MAR29SACBKN-BKNNCLOWNEY0-10'),
-    ('DeRozan 15+ pts',      'KXNBAPTS-26MAR29SACBKN-SACDDEROZA0-15'),
-    ('Claxton 2+ reb',       'KXNBAREB-26MAR29SACBKN-BKNNCLAXTONN0-2'),
-    ('Knueppel 15+ pts',     'KXNBAPTS-26MAR29BOSCHA-CHAKKNUEPPEL7-15'),
-    ('LaMelo 15+ pts',       'KXNBAPTS-26MAR29BOSCHA-CHALBALL1-15'),
-    ('Miles Bridges 10+ pts','KXNBAPTS-26MAR29BOSCHA-CHAMBRIDGES8-10'),
-    ('Aaron Gordon 10+ pts', 'KXNBAPTS-26MAR30GSDEN-DENAGORDON15-10'),
-    ('Jokic 20+ pts',        'KXNBAPTS-26MAR30GSDEN-DENNJOKIC15-20'),
-]
-
-from functools import reduce
-results = []
-for name, ticker in legs:
-    r = score_prop_leg(ticker)
-    conf = r.get('confidence', 0)
-    avg  = r.get('avg_stat', 0)
-    hr   = r.get('reason','')
-    hr_str = hr.split('hr=')[1].split(')')[0] if 'hr=' in hr else '?'
-    results.append((name, conf, avg, hr_str))
-
-print(f'{'Leg':<25} {'Avg':>5} {'HR':>5} {'Conf':>6} {'Verdict'}')
-print('-'*60)
-true_prob = 1.0
-for name, conf, avg, hr in results:
-    flag = '✅' if conf >= 0.75 else '⚠️ ' if conf >= 0.65 else '❌'
-    true_prob *= conf if conf > 0 else 0.45
-    print(f'{name:<25} {avg:>5.1f} {hr:>5} {conf:>6.2f} {flag}')
-
-print('-'*60)
-print(f'True probability: {true_prob*100:.3f}%')
-print(f'Market implied:   0.43%')
-print(f'EV: {true_prob * 1162/4.97:.2f}x (>1.0 = positive EV)')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''# Combo sizing
-MIN_COMBO_LEGS       = 6
-MAX_COMBO_LEGS       = 12
-MIN_COMBINED_CONF    = 0.005   # 2% floor
-MIN_PAYOUT_MULT      = 15.0    # Minimum expected payout multiplier'''
-
-new = '''# Combo sizing — MOONSHOT mode (default)
-MIN_COMBO_LEGS       = 6
-MAX_COMBO_LEGS       = 12
-MIN_COMBINED_CONF    = 0.005
-MIN_PAYOUT_MULT      = 15.0
-
-# HIGH CONFIDENCE mode thresholds
-HC_MIN_CONF          = 0.82    # Only legs with 82%+ model confidence
-HC_MAX_LEGS          = 30      # No cap — take all qualifying legs
-HC_MIN_PAYOUT        = 2.0     # Low payout floor, we want hit rate'''
-
-c = c.replace(old, new)
-
-old2 = '''def build_best_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
-    """
-    Build the best combo from available legs.
-    Pick legs that maximize payout while keeping combined confidence above floor.
-    """
-    if len(legs) < MIN_COMBO_LEGS:
-        log.info(f"[Combo] Not enough legs: {len(legs)} < {MIN_COMBO_LEGS}")
-        return None
-
-    # Take top legs by payout contribution up to MAX_COMBO_LEGS
-    selected = legs[:MAX_COMBO_LEGS]
-
-    candidate = ComboCandidate(MVE_COLLECTION, selected)
-
-    if candidate.combined_confidence < MIN_COMBINED_CONF:
-        log.info(f"[Combo] Combined conf too low: {candidate.combined_confidence:.3f}")
-        return None
-
-    if candidate.expected_payout < MIN_PAYOUT_MULT:
-        log.info(f"[Combo] Payout too low: {candidate.expected_payout:.1f}x")
-        return None
-
-    log.info(f"[Combo] CANDIDATE: {len(selected)} legs, "
-             f"conf={candidate.combined_confidence:.3f}, "
-             f"payout={candidate.expected_payout:.1f}x")
-    for leg in selected:
-        log.info(f"  {leg.ticker} yes={leg.implied_prob:.2f} conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
-
-    return candidate'''
-
-new2 = '''def build_best_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
-    """
-    MOONSHOT mode: maximize payout, top 12 edge-sorted legs.
-    """
-    if len(legs) < MIN_COMBO_LEGS:
-        log.info(f"[Combo] Not enough legs: {len(legs)} < {MIN_COMBO_LEGS}")
-        return None
-
-    selected  = legs[:MAX_COMBO_LEGS]
-    candidate = ComboCandidate(MVE_COLLECTION, selected)
-
-    if candidate.combined_confidence < MIN_COMBINED_CONF:
-        log.info(f"[Combo] Combined conf too low: {candidate.combined_confidence:.3f}")
-        return None
-
-    if candidate.expected_payout < MIN_PAYOUT_MULT:
-        log.info(f"[Combo] Payout too low: {candidate.expected_payout:.1f}x")
-        return None
-
-    log.info(f"[Combo] MOONSHOT: {len(selected)} legs, "
-             f"conf={candidate.combined_confidence:.3f}, "
-             f"payout={candidate.expected_payout:.1f}x")
-    for leg in selected:
-        log.info(f"  {leg.ticker} yes={leg.implied_prob:.2f} conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
-
-    return candidate
-
-
-def build_highconf_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
-    """
-    HIGH CONFIDENCE mode: take ALL legs above confidence threshold.
-    Maximizes hit rate over payout size.
-    """
-    # Filter to only high confidence legs, sorted by confidence desc
-    hc_legs = sorted(
-        [l for l in legs if l.confidence >= HC_MIN_CONF],
-        key=lambda x: x.confidence,
-        reverse=True
-    )[:HC_MAX_LEGS]
-
-    if len(hc_legs) < 2:
-        log.info(f"[Combo] HC: not enough high-conf legs ({len(hc_legs)})")
-        return None
-
-    candidate = ComboCandidate(MVE_COLLECTION, hc_legs)
-
-    if candidate.expected_payout < HC_MIN_PAYOUT:
-        log.info(f"[Combo] HC payout too low: {candidate.expected_payout:.1f}x")
-        return None
-
-    log.info(f"[Combo] HIGH CONF: {len(hc_legs)} legs, "
-             f"conf={candidate.combined_confidence:.3f}, "
-             f"payout={candidate.expected_payout:.1f}x")
-    for leg in hc_legs:
-        log.info(f"  {leg.ticker} yes={leg.implied_prob:.2f} conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
-
-    return candidate'''
-
-c = c.replace(old2, new2)
-
-old3 = '''def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
-    """
-    Main entry point. Scan all props, build best combo, execute if EV+.
-    """
-    log.info("[Combo] Starting combo scan")
-    candidates = []
-
-    if not dry_run and already_traded_today():
-        log.info("[Combo] Already placed a combo today — skipping")
-        return candidates
-
-    legs      = scan_all_props()
-    candidate = build_best_combo(legs)
-
-    if not candidate:
-        log.info("[Combo] No valid combo found")
-        return candidates
-
-    candidates.append(candidate)
-
-    if dry_run:
-        log.info(f"[Combo] DRY RUN — would submit RFQ")
-        return candidates
-
-    quote = submit_rfq(candidate)
-    if quote:
-        log.info(f"[Combo] EXECUTED")
-        _log_combo_trade(candidate, quote)
-
-    return candidates'''
-
-new3 = '''def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
-    """
-    Main entry point. Runs both MOONSHOT and HIGH CONFIDENCE combos.
-    """
-    log.info("[Combo] Starting combo scan — MOONSHOT + HIGH CONF modes")
-    candidates = []
-    legs       = scan_all_props()
-
-    # ── MOONSHOT combo ─────────────────────────────────────────────────
-    moonshot = build_best_combo(legs)
-    if moonshot:
-        candidates.append(moonshot)
-        if not dry_run:
-            log.info("[Combo] Submitting MOONSHOT RFQ...")
-            quote = submit_rfq(moonshot)
-            if quote:
-                log.info("[Combo] MOONSHOT EXECUTED")
-                _log_combo_trade(moonshot, quote, mode="moonshot")
-
-    # ── HIGH CONFIDENCE combo ──────────────────────────────────────────
-    highconf = build_highconf_combo(legs)
-    if highconf:
-        candidates.append(highconf)
-        if not dry_run:
-            log.info("[Combo] Submitting HIGH CONF RFQ...")
-            quote = submit_rfq(highconf)
-            if quote:
-                log.info("[Combo] HIGH CONF EXECUTED")
-                _log_combo_trade(highconf, quote, mode="highconf")
-
-    if not candidates:
-        log.info("[Combo] No valid combos found")
-
-    return candidates'''
-
-c = c.replace(old3, new3)
-
-# Update _log_combo_trade to accept mode
-old4 = '''def _log_combo_trade(candidate: ComboCandidate, quote: dict):'''
-new4 = '''def _log_combo_trade(candidate: ComboCandidate, quote: dict, mode: str = "moonshot"):'''
-c = c.replace(old4, new4)
-
-old5 = '''    entry = {
-        "time":               datetime.now(timezone.utc).isoformat(),
-        "collection_ticker":  candidate.collection_ticker,'''
-new5 = '''    entry = {
-        "time":               datetime.now(timezone.utc).isoformat(),
-        "mode":               mode,
-        "collection_ticker":  candidate.collection_ticker,'''
-c = c.replace(old5, new5)
-
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "
-from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
-from functools import reduce
-
-legs     = scan_all_props()
-moonshot = build_best_combo(legs)
-highconf = build_highconf_combo(legs)
-
-if moonshot:
-    p = moonshot.expected_payout
-    print(f'MOONSHOT:  {len(moonshot.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} | conf={moonshot.combined_confidence:.3f}')
-
-if highconf:
-    p = highconf.expected_payout
-    print(f'HIGH CONF: {len(highconf.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} | conf={highconf.combined_confidence:.3f}')
-    print('Legs:')
-    for l in highconf.legs:
-        print(f'  conf={l.confidence:.2f} | {l.reasoning[:60]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-grep -n "build_highconf_combo\|HIGH CONF\|HC_MIN_CONF" /root/kalshi-bot-v2/combo_scanner.py | head -10
-cat >> /root/kalshi-bot-v2/combo_scanner.py << 'PYEOF'
-
-
-def build_highconf_combo(legs: list[ComboLeg]) -> Optional[ComboCandidate]:
-    """
-    HIGH CONFIDENCE mode: take ALL legs above confidence threshold.
-    Maximizes hit rate over payout size.
-    """
-    hc_legs = sorted(
-        [l for l in legs if l.confidence >= HC_MIN_CONF],
-        key=lambda x: x.confidence,
-        reverse=True
-    )[:HC_MAX_LEGS]
-
-    if len(hc_legs) < 2:
-        log.info(f"[Combo] HC: not enough high-conf legs ({len(hc_legs)})")
-        return None
-
-    candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', hc_legs)
-
-    if candidate.expected_payout < HC_MIN_PAYOUT:
-        log.info(f"[Combo] HC payout too low: {candidate.expected_payout:.1f}x")
-        return None
-
-    log.info(f"[Combo] HIGH CONF: {len(hc_legs)} legs, "
-             f"conf={candidate.combined_confidence:.3f}, "
-             f"payout={candidate.expected_payout:.1f}x")
-    for leg in hc_legs:
-        log.info(f"  conf={leg.confidence:.2f} | {leg.reasoning[:60]}")
-
-    return candidate
-PYEOF
-
-python3 -c "
-from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
-from functools import reduce
-
-legs     = scan_all_props()
-moonshot = build_best_combo(legs)
-highconf = build_highconf_combo(legs)
-
-if moonshot:
-    p = moonshot.expected_payout
-    print(f'MOONSHOT:  {len(moonshot.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} | conf={moonshot.combined_confidence:.3f}')
-
-if highconf:
-    p = highconf.expected_payout
-    print(f'HIGH CONF: {len(highconf.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} | conf={highconf.combined_confidence:.3f}')
-    for l in highconf.legs:
-        print(f'  conf={l.confidence:.2f} | {l.reasoning[:55]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-c = c.replace(
-    '''    import re as _re
-    # Filter high conf legs, dedupe by player (one leg per player total)
-    seen_players = {}
-    for l in sorted(legs, key=lambda x: x.confidence, reverse=True):
-        if l.confidence < HC_MIN_CONF:
-            continue
-        pm = _re.search(
-            r\'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|\'
-            r\'CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)\'
-            r\'[A-Z0-9]+)-\', l.ticker
-        )
-        player_key = pm.group(1) if pm else l.ticker
-        if player_key not in seen_players:
-            seen_players[player_key] = l
-    hc_legs = list(seen_players.values())[:HC_MAX_LEGS]''',
-    '''    import re as _re
-    # Filter high conf legs, dedupe by player+stat (one threshold per stat per player)
-    seen = {}
-    for l in sorted(legs, key=lambda x: x.confidence, reverse=True):
-        if l.confidence < HC_MIN_CONF:
-            continue
-        series = l.ticker.split(\'-\')[0]  # e.g. KXNBAPTS
-        pm = _re.search(
-            r\'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|\'
-            r\'CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)\'
-            r\'[A-Z0-9]+)-\', l.ticker
-        )
-        player_key = pm.group(1) if pm else l.ticker
-        key = f\'{series}-{player_key}\'  # unique per player per stat
-        if key not in seen:
-            seen[key] = l
-    hc_legs = list(seen.values())[:HC_MAX_LEGS]'''
-)
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-legs     = scan_all_props()
-highconf = build_highconf_combo(legs)
-if highconf:
-    p = highconf.expected_payout
-    print(f'HIGH CONF: {len(highconf.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} | conf={highconf.combined_confidence:.4f}')
-    for l in highconf.legs:
-        print(f'  conf={l.confidence:.2f} | {l.reasoning[:60]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-git add -A && git commit -m "feat: high confidence combo mode — all 90%+ legs, one per player per stat" && git push origin master
-python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Dynamic|RFQ|Quote|No quote|EXECUTED" | head -20
-grep "yes_bid.*0.05\|MIN.*quote\|>= 0.05\|>= 0.02" /root/kalshi-bot-v2/combo_scanner.py | head -5
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''            yes_q = [q for q in qs if float(q.get(\'yes_bid_dollars\',0) or 0) > 0 and q.get(\'status\')==\'open\']'''
-new = '''            yes_q = [q for q in qs if float(q.get(\'yes_bid_dollars\',0) or 0) >= 0.05 and q.get(\'status\')==\'open\']'''
-c = c.replace(old, new)
-
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-grep "yes_bid" /root/kalshi-bot-v2/combo_scanner.py | grep "0.05\|0.02"
-python3 -c "
-import json
-trades = json.load(open('data/combo_trades.json'))
-print(f'Total combos placed: {len(trades)}')
-for t in trades[-3:]:
-    mode = t.get('mode', 'unknown')
-    legs = len(t.get('legs', []))
-    quote = t.get('quote', {})
-    bid = quote.get('yes_bid_dollars', '?')
-    print(f'  {t[\"time\"][:16]} | {mode} | {legs} legs | bid=\${bid}')
-"
-grep -n "MOONSHOT\|HIGH CONF\|build_highconf\|build_best" /root/kalshi-bot-v2/combo_scanner.py | tail -20
-sed -n '550,590p' /root/kalshi-bot-v2/combo_scanner.py
-python3 << 'PYEOF'
-f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
-c = f.read()
-f.close()
-
-old = '''def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
-    """
-    Main entry point. Scan all props, build best combo, execute if EV+.
-    """
-    log.info("[Combo] Starting combo scan")
-    candidates = []
-
-    legs      = scan_all_props()
-    candidate = build_best_combo(legs)
-
-    if not candidate:
-        log.info("[Combo] No valid combo found")
-        return candidates
-
-    candidates.append(candidate)
-
-    if dry_run:
-        log.info(f"[Combo] DRY RUN — would submit RFQ")
-        return candidates
-
-    quote = submit_rfq(candidate)
-    if quote:
-        log.info(f"[Combo] EXECUTED")
-        _log_combo_trade(candidate, quote)
-
-    return candidates'''
-
-new = '''def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
-    """
-    Main entry point. Runs MOONSHOT + HIGH CONFIDENCE combos.
-    """
-    log.info("[Combo] Starting combo scan — MOONSHOT + HIGH CONF modes")
-    candidates = []
-    legs       = scan_all_props()
-
-    # ── MOONSHOT ───────────────────────────────────────────────────────
-    moonshot = build_best_combo(legs)
-    if moonshot:
-        candidates.append(moonshot)
-        if dry_run:
-            log.info(f"[Combo] DRY RUN — MOONSHOT {len(moonshot.legs)} legs {moonshot.expected_payout:.1f}x")
-        else:
-            log.info("[Combo] Submitting MOONSHOT...")
-            quote = submit_rfq(moonshot)
-            if quote:
-                log.info("[Combo] MOONSHOT EXECUTED")
-                _log_combo_trade(moonshot, quote, mode="moonshot")
-
-    # ── HIGH CONFIDENCE ────────────────────────────────────────────────
-    highconf = build_highconf_combo(legs)
-    if highconf:
-        candidates.append(highconf)
-        if dry_run:
-            log.info(f"[Combo] DRY RUN — HIGH CONF {len(highconf.legs)} legs {highconf.expected_payout:.1f}x")
-        else:
-            log.info("[Combo] Submitting HIGH CONF...")
-            quote = submit_rfq(highconf)
-            if quote:
-                log.info("[Combo] HIGH CONF EXECUTED")
-                _log_combo_trade(highconf, quote, mode="highconf")
-
-    if not candidates:
-        log.info("[Combo] No valid combos found")
-
-    return candidates'''
-
-c = c.replace(old, new)
-open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
-print("Done")
-PYEOF
-
-python3 combo_scanner.py 2>&1 | grep -E "MOONSHOT|HIGH CONF|DRY RUN|No valid"
-grep -n "HC_MAX_LEGS\|HC_MIN_CONF\|HC_MIN_PAYOUT" /root/kalshi-bot-v2/combo_scanner.py
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo, HC_MIN_CONF
-legs = scan_all_props()
-hc = [l for l in legs if l.confidence >= HC_MIN_CONF]
-print(f'Total legs: {len(legs)}')
-print(f'HC qualified (>={HC_MIN_CONF}): {len(hc)}')
-if hc:
-    for l in hc[:5]:
-        print(f'  conf={l.confidence:.2f} price={l.implied_prob:.2f} | {l.reasoning[:50]}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-from combo_scanner import scan_all_props, HC_MIN_CONF, HC_MAX_LEGS, HC_MIN_PAYOUT
-from combo_scanner import ComboCandidate
-import re
-
-legs = scan_all_props()
-
-# Replicate build_highconf_combo logic
-seen = {}
-for l in sorted(legs, key=lambda x: x.confidence, reverse=True):
-    if l.confidence < HC_MIN_CONF:
-        continue
-    series = l.ticker.split('-')[0]
-    pm = re.search(r'-((?:LAC|IND|GSW|NYK|BOS|MIA|MIL|DEN|PHX|DAL|LAL|MEM|ATL|CLE|CHI|OKC|SAS|NOP|MIN|UTA|POR|SAC|TOR|DET|HOU|ORL|PHI|BKN|CHA|WAS)[A-Z0-9]+)-', l.ticker)
-    player_key = pm.group(1) if pm else l.ticker
-    key = f'{series}-{player_key}'
-    if key not in seen:
-        seen[key] = l
-
-hc_legs = list(seen.values())[:HC_MAX_LEGS]
-print(f'HC legs after dedup: {len(hc_legs)}')
-
-candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', hc_legs)
-print(f'Payout: {candidate.expected_payout:.1f}x')
-print(f'Min payout required: {HC_MIN_PAYOUT}')
-print(f'Passes: {candidate.expected_payout >= HC_MIN_PAYOUT}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "from combo_scanner import build_highconf_combo; print('OK')"
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-legs = scan_all_props()
-print(f'Legs: {len(legs)}')
-result = build_highconf_combo(legs)
-print(f'Result: {result}')
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-grep -n "def scan_and_execute\|def build_highconf_combo\|def build_best_combo" /root/kalshi-bot-v2/combo_scanner.py
-sed -n '553,620p' /root/kalshi-bot-v2/combo_scanner.py
-python3 -c "
-import logging
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-from combo_scanner import scan_and_execute
-scan_and_execute(dry_run=True)
-" 2>&1 | grep -E "MOONSHOT|HIGH|Combo|valid"
-git add -A && git commit -m "feat: dual combo modes — MOONSHOT 12-leg + HIGH CONF 30-leg, min quote 5c" && git push origin master
-screen -S combo -X quit
-screen -S combo bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scheduler.py; exec bash'
-cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Dynamic|RFQ|Quote|No quote|EXECUTED|legs" | head -20
-python3 -c "
-from data.prop_scanner import scan_edges
-from combo_scanner import build_highconf_combo, scan_all_props, HC_MIN_CONF
-import re
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-if not hc:
-    print('No HC combo')
-else:
-    print(f'HIGH CONF: {len(hc.legs)} legs | {hc.expected_payout:.1f}x | \$5->\${5*hc.expected_payout:.0f}')
-    print()
-    
-    # Group by game
-    games = {}
-    for l in hc.legs:
-        m = re.search(r'\d{2}[A-Z]{3}\d{2}([A-Z]{6})', l.ticker.split('-')[1])
-        code = m.group(1) if m else '??????'
-        t1, t2 = code[:3], code[3:6]
-        game = f'{t1} vs {t2}'
-        games.setdefault(game, []).append(l)
-    
-    for game, game_legs in games.items():
-        print(f'{game}:')
-        for l in game_legs:
-            thr    = l.ticker.split('-')[-1]
-            series = l.ticker.split('-')[0]
-            stat   = {'KXNBAPTS':'pts','KXNBAREB':'reb','KXNBAAST':'ast','KXNBA3PT':'3s','KXNBASTL':'stl','KXNBABLK':'blk'}.get(series,'?')
-            player = l.reasoning.split(' avg')[0]
-            price  = int(l.implied_prob * 100)
-            hr     = l.reasoning.split('hr=')[1].split(')')[0] if 'hr=' in l.reasoning else '?'
-            print(f'  {player} {thr}+ {stat} @ {price}¢  (HR:{hr} conf:{l.confidence:.2f})')
-        print()
-" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
-python3 -c "
-from combo_scanner import scan_all_props, build_highconf_combo
-import re
-
-legs = scan_all_props()
-hc   = build_highconf_combo(legs)
-
-if hc:
-    print(f'HIGH CONF: {len(hc.legs)} legs | {hc.expected_payout:.1f}x | \$5->\${5*hc.expected_payout:.0f}')
-    print()
-    games = {}
-    for l in hc.legs:
-        m = re.search(r'\d{2}[A-Z]{3}\d{2}([A-Z]{6})', l.ticker.split('-')[1])
-        code = m.group(1) if m else '??????'
-        t1, t2 = code[:3], code[3:6]
-        games.setdefault(f'{t1} vs {t2}', []).append(l)
-    for game, gl in games.items():
-        print(f'{game}:')
-        for l in gl:
-            thr    = l.ticker.split('-')[-1]
-            series = l.ticker.split('-')[0]
-            stat   = {'KXNBAPTS':'pts','KXNBAREB':'reb','KXNBAAST':'ast','KXNBA3PT':'3s','KXNBASTL':'stl','KXNBABLK':'blk'}.get(series,'?')
             player = l.reasoning.split(' avg')[0]
             price  = int(l.implied_prob * 100)
             hr     = l.reasoning.split('hr=')[1].split(')')[0] if 'hr=' in l.reasoning else '?'
@@ -1998,3 +898,1103 @@ for espn_id in ids:
     else:
         print(f'{espn_id}: HTTP {r.status_code}')
 "
+source /root/kalshi-bot/bin/activate
+pip install fastapi uvicorn --break-system-packages
+cat > /root/kalshi-bot-v2/api_server.py << 'PYEOF'
+#!/usr/bin/env python3
+"""
+api_server.py
+─────────────────────────────────────────────────────────────────────────────
+FastAPI server exposing kalshi-bot-v2 data to the mobile app.
+Read-only — never touches trading logic.
+
+Run: uvicorn api_server:app --host 0.0.0.0 --port 8080
+"""
+
+import os
+import json
+import sys
+sys.path.insert(0, '/root/kalshi-bot-v2')
+
+from fastapi import FastAPI, HTTPException, Header
+from fastapi.middleware.cors import CORSMiddleware
+from datetime import datetime, timezone
+
+app = FastAPI(title="Kalshi Bot API", version="1.0")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ── Auth ───────────────────────────────────────────────────────────────────
+
+API_KEY = os.getenv("BOT_API_KEY", "changeme123")
+
+def verify_key(x_api_key: str = Header(...)):
+    if x_api_key != API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+
+# ── Routes ─────────────────────────────────────────────────────────────────
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/balance")
+def get_balance(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        from core.kalshi_client import get_balance
+        bal = get_balance()
+        return {"balance": round(bal, 2)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/combos")
+def get_combos(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    log_file = "/root/kalshi-bot-v2/data/combo_trades.json"
+    if not os.path.exists(log_file):
+        return {"combos": []}
+    try:
+        combos = json.load(open(log_file))
+        return {"combos": combos[-10:]}  # Last 10
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/parlay/moonshot")
+def get_moonshot(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        from combo_scanner import scan_all_props, build_best_combo
+        legs      = scan_all_props()
+        candidate = build_best_combo(legs)
+        if not candidate:
+            return {"found": False, "legs": [], "payout": 0, "confidence": 0}
+        return {
+            "found":      True,
+            "mode":       "moonshot",
+            "leg_count":  len(candidate.legs),
+            "payout":     round(candidate.expected_payout, 1),
+            "confidence": round(candidate.combined_confidence * 100, 2),
+            "stake":      5.0,
+            "win_amount": round(5.0 * candidate.expected_payout, 0),
+            "legs": [{
+                "ticker":     l.ticker,
+                "player":     l.reasoning.split(' avg')[0],
+                "reasoning":  l.reasoning,
+                "confidence": round(l.confidence * 100, 1),
+                "market_price": round(l.implied_prob * 100, 0),
+                "edge":       round((l.confidence - l.implied_prob) * 100, 1),
+            } for l in candidate.legs]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/parlay/monster")
+def get_monster(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        from combo_scanner import scan_all_props, build_highconf_combo
+        legs      = scan_all_props()
+        candidate = build_highconf_combo(legs)
+        if not candidate:
+            return {"found": False, "legs": [], "payout": 0, "confidence": 0}
+        return {
+            "found":      True,
+            "mode":       "monster",
+            "leg_count":  len(candidate.legs),
+            "payout":     round(candidate.expected_payout, 1),
+            "confidence": round(candidate.combined_confidence * 100, 2),
+            "stake":      5.0,
+            "win_amount": round(5.0 * candidate.expected_payout, 0),
+            "legs": [{
+                "ticker":     l.ticker,
+                "player":     l.reasoning.split(' avg')[0],
+                "reasoning":  l.reasoning,
+                "confidence": round(l.confidence * 100, 1),
+                "market_price": round(l.implied_prob * 100, 0),
+                "edge":       round((l.confidence - l.implied_prob) * 100, 1),
+            } for l in candidate.legs]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/schedule")
+def get_schedule(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    try:
+        import requests
+        from datetime import date
+        today = date.today().strftime("%Y%m%d")
+        r = requests.get(
+            f"https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates={today}",
+            timeout=6
+        )
+        games = []
+        for event in r.json().get("events", []):
+            comps = event.get("competitions", [{}])[0]
+            teams = comps.get("competitors", [])
+            status = comps.get("status", {}).get("type", {})
+            games.append({
+                "name":    event.get("name", ""),
+                "date":    event.get("date", ""),
+                "status":  status.get("name", ""),
+                "completed": status.get("completed", False),
+                "teams":   [{"abbr": t.get("team",{}).get("abbreviation",""),
+                             "score": t.get("score","0")} for t in teams]
+            })
+        return {"games": games}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/stats")
+def get_stats(x_api_key: str = Header(...)):
+    verify_key(x_api_key)
+    import csv
+    from collections import defaultdict
+
+    result = {}
+
+    # Paper trades v2
+    paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
+    if os.path.exists(paper_file):
+        rows     = list(csv.DictReader(open(paper_file)))
+        resolved = [r for r in rows if r.get('resolved','') not in ('','no')]
+        wins     = sum(1 for r in resolved if float(r.get('hyp_pnl',0) or 0) > 0)
+        pnl      = sum(float(r.get('hyp_pnl',0) or 0) for r in resolved)
+        result["paper"] = {
+            "total":    len(rows),
+            "resolved": len(resolved),
+            "wins":     wins,
+            "win_rate": round(wins/len(resolved)*100, 1) if resolved else 0,
+            "pnl":      round(pnl, 2)
+        }
+
+    # Combo stats
+    combo_file = "/root/kalshi-bot-v2/data/combo_trades.json"
+    if os.path.exists(combo_file):
+        combos = json.load(open(combo_file))
+        result["combos"] = {
+            "total":  len(combos),
+            "spent":  len(combos) * 5.0,
+        }
+
+    return result
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8080)
+PYEOF
+
+echo "Written — $(wc -l < /root/kalshi-bot-v2/api_server.py) lines"
+echo "BOT_API_KEY=$(openssl rand -hex 16)" >> /root/.env
+grep "BOT_API_KEY" /root/.env | tail -1
+cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && python3 api_server.py &
+sleep 3
+# Test health endpoint
+curl -s http://localhost:8080/health | python3 -m json.tool
+# Get the API key
+API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
+echo "API Key: $API_KEY"
+# Test balance
+curl -s http://localhost:8080/api/balance -H "x-api-key: $API_KEY" | python3 -m json.tool
+# Test schedule
+curl -s http://localhost:8080/api/schedule -H "x-api-key: $API_KEY" | python3 -m json.tool | head -30
+kill %1
+source /root/kalshi-bot/bin/activate
+cd /root/kalshi-bot-v2
+API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
+echo "Key: $API_KEY"
+BOT_API_KEY=$API_KEY python3 api_server.py &
+sleep 3
+curl -s http://localhost:8080/api/balance -H "x-api-key: $API_KEY" | python3 -m json.tool
+API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
+# Stats
+curl -s http://localhost:8080/api/stats -H "x-api-key: $API_KEY" | python3 -m json.tool
+# Schedule
+curl -s http://localhost:8080/api/schedule -H "x-api-key: $API_KEY" | python3 -m json.tool | head -40
+# Combos
+curl -s http://localhost:8080/api/combos -H "x-api-key: $API_KEY" | python3 -m json.tool | head -20
+kill %1
+screen -S api bash -c 'cd /root/kalshi-bot-v2 && source /root/kalshi-bot/bin/activate && BOT_API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d"=" -f2) python3 api_server.py; exec bash'
+git add api_server.py && git commit -m "feat: REST API server for mobile app — balance, combos, parlay, schedule, stats" && git push origin master
+grep "BOT_API_KEY" /root/.env | tail -1
+mkdir -p /root/kalshi-bot-v2/app
+cat > /root/kalshi-bot-v2/app/index.html << 'PYEOF'
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Kalshi Bot">
+  <title>Kalshi Bot</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #0a0a0a;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding-bottom: 80px;
+    }
+    .header {
+      background: linear-gradient(135deg, #1a1a2e, #16213e);
+      padding: 50px 20px 20px;
+      border-bottom: 1px solid #333;
+    }
+    .header h1 { font-size: 28px; font-weight: 700; }
+    .header p  { color: #888; font-size: 13px; margin-top: 4px; }
+    .balance-card {
+      background: linear-gradient(135deg, #00b894, #00cec9);
+      margin: 16px;
+      border-radius: 16px;
+      padding: 20px;
+    }
+    .balance-card .label { font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 1px; }
+    .balance-card .amount { font-size: 42px; font-weight: 700; margin-top: 4px; }
+    .balance-card .sub { font-size: 12px; opacity: 0.8; margin-top: 4px; }
+    .section { margin: 16px; }
+    .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: #666;
+      margin-bottom: 10px;
+    }
+    .btn-row { display: flex; gap: 10px; }
+    .btn {
+      flex: 1;
+      padding: 16px;
+      border-radius: 14px;
+      border: none;
+      font-size: 15px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      transition: opacity 0.2s;
+    }
+    .btn:active { opacity: 0.7; }
+    .btn .icon { font-size: 28px; }
+    .btn-moonshot { background: linear-gradient(135deg, #6c5ce7, #a29bfe); color: #fff; }
+    .btn-monster  { background: linear-gradient(135deg, #e17055, #d63031); color: #fff; }
+    .card {
+      background: #1a1a1a;
+      border-radius: 14px;
+      padding: 16px;
+      margin-bottom: 10px;
+      border: 1px solid #2a2a2a;
+    }
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .card-title { font-size: 16px; font-weight: 600; }
+    .badge {
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-weight: 600;
+    }
+    .badge-green  { background: #00b894; color: #fff; }
+    .badge-purple { background: #6c5ce7; color: #fff; }
+    .badge-red    { background: #d63031; color: #fff; }
+    .leg {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid #2a2a2a;
+      font-size: 13px;
+    }
+    .leg:last-child { border-bottom: none; }
+    .leg-name { color: #ddd; flex: 1; }
+    .leg-conf { color: #00b894; font-weight: 600; font-size: 12px; margin-left: 8px; }
+    .leg-edge { color: #6c5ce7; font-size: 11px; margin-left: 6px; }
+    .payout-row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #2a2a2a;
+    }
+    .payout-label { color: #888; font-size: 13px; }
+    .payout-value { font-size: 20px; font-weight: 700; color: #00b894; }
+    .game-card {
+      background: #1a1a1a;
+      border-radius: 14px;
+      padding: 14px 16px;
+      margin-bottom: 8px;
+      border: 1px solid #2a2a2a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .game-teams { font-size: 14px; font-weight: 600; }
+    .game-score { font-size: 18px; font-weight: 700; color: #00b894; }
+    .game-status { font-size: 11px; color: #888; margin-top: 2px; }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    .spinner {
+      width: 32px; height: 32px;
+      border: 3px solid #333;
+      border-top-color: #00b894;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .nav {
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      background: #111;
+      border-top: 1px solid #2a2a2a;
+      display: flex;
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    .nav-item {
+      flex: 1;
+      padding: 12px 0;
+      text-align: center;
+      cursor: pointer;
+      font-size: 10px;
+      color: #666;
+      transition: color 0.2s;
+    }
+    .nav-item.active { color: #00b894; }
+    .nav-item .nav-icon { font-size: 22px; display: block; margin-bottom: 2px; }
+    .screen { display: none; }
+    .screen.active { display: block; }
+    .error { color: #e17055; font-size: 13px; text-align: center; padding: 20px; }
+    .refresh-btn {
+      background: #1a1a1a;
+      border: 1px solid #333;
+      color: #888;
+      padding: 8px 16px;
+      border-radius: 20px;
+      font-size: 12px;
+      cursor: pointer;
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- HOME -->
+<div id="screen-home" class="screen active">
+  <div class="header">
+    <h1>🤖 Kalshi Bot</h1>
+    <p id="last-updated">Loading...</p>
+  </div>
+
+  <div class="balance-card">
+    <div class="label">Portfolio Balance</div>
+    <div class="amount" id="balance-amount">--</div>
+    <div class="sub" id="combo-sub">Loading...</div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Find Best Combo</div>
+    <div class="btn-row">
+      <button class="btn btn-moonshot" onclick="showParlay('moonshot')">
+        <span class="icon">🎯</span>
+        <span>Moonshot</span>
+      </button>
+      <button class="btn btn-monster" onclick="showParlay('monster')">
+        <span class="icon">💪</span>
+        <span>Monster</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Tonight's Games</div>
+    <div id="games-list"><div class="loading"><div class="spinner"></div>Loading...</div></div>
+  </div>
+</div>
+
+<!-- PARLAY -->
+<div id="screen-parlay" class="screen">
+  <div class="header">
+    <h1 id="parlay-title">🎯 Moonshot</h1>
+    <p id="parlay-sub">Scanning props...</p>
+  </div>
+  <div class="section" id="parlay-content">
+    <div class="loading"><div class="spinner"></div>Scanning props...</div>
+  </div>
+</div>
+
+<!-- COMBOS -->
+<div id="screen-combos" class="screen">
+  <div class="header">
+    <h1>📋 My Combos</h1>
+    <p>Recent combo trades</p>
+  </div>
+  <div class="section" id="combos-content">
+    <div class="loading"><div class="spinner"></div>Loading...</div>
+  </div>
+</div>
+
+<!-- STATS -->
+<div id="screen-stats" class="screen">
+  <div class="header">
+    <h1>📊 Stats</h1>
+    <p>Trading performance</p>
+  </div>
+  <div class="section" id="stats-content">
+    <div class="loading"><div class="spinner"></div>Loading...</div>
+  </div>
+</div>
+
+<!-- NAV -->
+<nav class="nav">
+  <div class="nav-item active" onclick="showScreen('home')">
+    <span class="nav-icon">🏠</span>Home
+  </div>
+  <div class="nav-item" onclick="showScreen('parlay-select')">
+    <span class="nav-icon">🎯</span>Parlay
+  </div>
+  <div class="nav-item" onclick="showScreen('combos')">
+    <span class="nav-icon">📋</span>Combos
+  </div>
+  <div class="nav-item" onclick="showScreen('stats')">
+    <span class="nav-icon">📊</span>Stats
+  </div>
+</nav>
+
+<script>
+const API_BASE = 'http://137.184.84.50:8080';
+const API_KEY  = 'REPLACE_ME';
+
+async function api(path) {
+  const r = await fetch(API_BASE + path, {
+    headers: { 'x-api-key': API_KEY }
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+
+  if (name === 'parlay-select') {
+    document.getElementById('screen-home').classList.add('active');
+    document.querySelectorAll('.nav-item')[1].classList.add('active');
+    document.querySelector('.section').scrollIntoView({behavior:'smooth'});
+    return;
+  }
+
+  const screens = ['home','parlay','combos','stats'];
+  const idx = screens.indexOf(name);
+  document.getElementById('screen-' + name).classList.add('active');
+  if (idx >= 0) document.querySelectorAll('.nav-item')[idx].classList.add('active');
+
+  if (name === 'combos') loadCombos();
+  if (name === 'stats')  loadStats();
+  if (name === 'home')   loadHome();
+}
+
+async function loadHome() {
+  try {
+    const [bal, sched] = await Promise.all([api('/api/balance'), api('/api/schedule')]);
+    document.getElementById('balance-amount').textContent = '$' + bal.balance.toFixed(2);
+    document.getElementById('last-updated').textContent = 'Updated ' + new Date().toLocaleTimeString();
+
+    // Games
+    const gamesList = document.getElementById('games-list');
+    const games = sched.games.filter(g => !g.completed || g.status === 'STATUS_IN_PROGRESS');
+    if (!games.length) {
+      gamesList.innerHTML = '<div class="error">No games in progress</div>';
+    } else {
+      gamesList.innerHTML = games.map(g => {
+        const t = g.teams;
+        const score = t.length === 2 ? `${t[0].score} - ${t[1].score}` : '';
+        const status = g.status === 'STATUS_IN_PROGRESS' ? '🔴 LIVE' :
+                       g.status === 'STATUS_SCHEDULED' ? '⏰ Soon' : '✅ Final';
+        return `<div class="game-card">
+          <div>
+            <div class="game-teams">${g.name.replace(' at ', ' @ ')}</div>
+            <div class="game-status">${status}</div>
+          </div>
+          <div class="game-score">${score}</div>
+        </div>`;
+      }).join('');
+    }
+
+    // Combo sub
+    const combos = await api('/api/combos');
+    document.getElementById('combo-sub').textContent =
+      `${combos.combos.length} combos placed`;
+  } catch(e) {
+    document.getElementById('balance-amount').textContent = 'Error';
+  }
+}
+
+async function showParlay(mode) {
+  showScreen('parlay');
+  const title = mode === 'monster' ? '💪 Monster Combo' : '🎯 Moonshot Combo';
+  document.getElementById('parlay-title').textContent = title;
+  document.getElementById('parlay-sub').textContent = 'Scanning props...';
+  document.getElementById('parlay-content').innerHTML =
+    '<div class="loading"><div class="spinner"></div>Scanning (~10s)...</div>';
+
+  try {
+    const data = await api('/api/parlay/' + mode);
+    document.getElementById('parlay-sub').textContent =
+      `${data.leg_count} legs · ${data.confidence}% conf`;
+
+    if (!data.found) {
+      document.getElementById('parlay-content').innerHTML =
+        '<div class="error">No qualifying combo right now. Try closer to game time.</div>';
+      return;
+    }
+
+    const legsHtml = data.legs.map(l => {
+      const player = l.player || l.ticker;
+      const thr = l.ticker.split('-').pop();
+      const series = l.ticker.split('-')[0];
+      const statMap = {KXNBAPTS:'pts',KXNBAREB:'reb',KXNBAAST:'ast',
+                       KXNBA3PT:'3s',KXNBASTL:'stl',KXNBABLK:'blk'};
+      const stat = statMap[series] || '';
+      return `<div class="leg">
+        <span class="leg-name">${player} ${thr}+ ${stat}</span>
+        <span class="leg-conf">${l.confidence}%</span>
+        <span class="leg-edge">+${l.edge}¢</span>
+      </div>`;
+    }).join('');
+
+    document.getElementById('parlay-content').innerHTML = `
+      <div class="card">
+        <div class="card-header">
+          <span class="card-title">${data.leg_count} Legs</span>
+          <span class="badge badge-green">${data.payout}x</span>
+        </div>
+        ${legsHtml}
+        <div class="payout-row">
+          <span class="payout-label">$5 stake → potential</span>
+          <span class="payout-value">$${data.win_amount}</span>
+        </div>
+      </div>
+      <button class="refresh-btn" onclick="showParlay('${mode}')">🔄 Rescan</button>`;
+  } catch(e) {
+    document.getElementById('parlay-content').innerHTML =
+      '<div class="error">Error: ' + e.message + '</div>';
+  }
+}
+
+async function loadCombos() {
+  try {
+    const data = await api('/api/combos');
+    const combos = data.combos.reverse();
+    if (!combos.length) {
+      document.getElementById('combos-content').innerHTML =
+        '<div class="error">No combos placed yet</div>';
+      return;
+    }
+    document.getElementById('combos-content').innerHTML = combos.map(c => {
+      const date = new Date(c.time).toLocaleDateString();
+      const payout = c.expected_payout ? c.expected_payout.toFixed(1) : '?';
+      const mode = c.mode || 'combo';
+      return `<div class="card">
+        <div class="card-header">
+          <span class="card-title">${c.legs.length}-leg ${mode}</span>
+          <span class="badge badge-purple">${payout}x</span>
+        </div>
+        <div style="color:#888;font-size:12px">${date} · ${c.legs.length} legs</div>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    document.getElementById('combos-content').innerHTML =
+      '<div class="error">Error loading combos</div>';
+  }
+}
+
+async function loadStats() {
+  try {
+    const data = await api('/api/stats');
+    let html = '';
+    if (data.paper) {
+      const p = data.paper;
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">V2 Paper Trader</span>
+          <span class="badge ${p.pnl >= 0 ? 'badge-green' : 'badge-red'}">
+            $${p.pnl >= 0 ? '+' : ''}${p.pnl}
+          </span>
+        </div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${p.win_rate}%</span></div>
+        <div class="leg"><span class="leg-name">Resolved</span><span class="leg-conf">${p.resolved}/${p.total}</span></div>
+      </div>`;
+    }
+    if (data.combos) {
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">Combo Trades</span>
+          <span class="badge badge-purple">${data.combos.total} placed</span>
+        </div>
+        <div class="leg"><span class="leg-name">Total Spent</span><span class="leg-conf">$${data.combos.spent}</span></div>
+      </div>`;
+    }
+    document.getElementById('stats-content').innerHTML = html || '<div class="error">No stats yet</div>';
+  } catch(e) {
+    document.getElementById('stats-content').innerHTML =
+      '<div class="error">Error loading stats</div>';
+  }
+}
+
+// Boot
+loadHome();
+</script>
+</body>
+</html>
+PYEOF
+
+echo "Written"
+API_KEY=$(grep "BOT_API_KEY" /root/.env | tail -1 | cut -d'=' -f2)
+sed -i "s/REPLACE_ME/$API_KEY/" /root/kalshi-bot-v2/app/index.html
+echo "Key injected"
+# Serve the app on port 3000
+cd /root/kalshi-bot-v2/app && python3 -m http.server 3000 &
+echo "App running at http://137.184.84.50:3000"
+cd /root/kalshi-bot-v2 && python3 -c "
+from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
+from functools import reduce
+
+legs     = scan_all_props()
+moonshot = build_best_combo(legs)
+monster  = build_highconf_combo(legs)
+
+if moonshot:
+    p = moonshot.expected_payout
+    print(f'MOONSHOT: {len(moonshot.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f}')
+
+if monster:
+    p = monster.expected_payout
+    print(f'MONSTER:  {len(monster.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f}')
+" 2>&1 | grep -E "MOONSHOT|MONSTER|No"
+python3 -c "
+from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
+import re
+
+legs     = scan_all_props()
+moonshot = build_best_combo(legs)
+monster  = build_highconf_combo(legs)
+
+for label, candidate in [('MOONSHOT', moonshot), ('MONSTER', monster)]:
+    if not candidate:
+        continue
+    p = candidate.expected_payout
+    print(f'--- {label}: {len(candidate.legs)} legs | {p:.1f}x | \$5->\${5*p:.0f} ---')
+    for l in candidate.legs:
+        thr    = l.ticker.split('-')[-1]
+        series = l.ticker.split('-')[0]
+        stat   = {'KXNBAPTS':'pts','KXNBAREB':'reb','KXNBAAST':'ast','KXNBA3PT':'3s','KXNBASTL':'stl','KXNBABLK':'blk'}.get(series,'?')
+        player = l.reasoning.split(' avg')[0]
+        hr     = l.reasoning.split('hr=')[1].split(')')[0] if 'hr=' in l.reasoning else '?'
+        edge   = round((l.confidence - l.implied_prob)*100, 1)
+        print(f'  {player} {thr}+ {stat} | HR:{hr} edge:+{edge}c conf:{l.confidence:.2f}')
+    print()
+" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Dynamic|RFQ|Quote|No quote|EXECUTED|rejected|payout" | head -20
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
+c = f.read()
+f.close()
+c = c.replace(
+    '    # ── Price monitoring (5 min window) ───────────────────────────────\n    if not dry_run and legs:',
+    '    # ── Price monitoring DISABLED ─────────────────────────────────────\n    if False and not dry_run and legs:'
+)
+open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Dynamic|RFQ|Quote|No quote|EXECUTED|rejected" | head -20
+python3 -c "
+from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
+legs = scan_all_props()
+m = build_best_combo(legs)
+h = build_highconf_combo(legs)
+print(f'Moonshot: {len(m.legs)} legs' if m else 'No moonshot')
+print(f'Monster: {len(h.legs)} legs' if h else 'No monster')
+" 2>&1 | grep -E "Moonshot|Monster"
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
+c = f.read()
+f.close()
+c = c.replace('QUOTE_TIMEOUT_SECS = 15', 'QUOTE_TIMEOUT_SECS = 20')
+c = c.replace('MAX_COMBO_LEGS       = 12', 'MAX_COMBO_LEGS       = 10')
+open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Dynamic|RFQ|Quote|No quote|EXECUTED|rejected" | head -20
+grep "QUOTE_TIMEOUT" /root/kalshi-bot-v2/combo_scanner.py
+sed -i 's/QUOTE_TIMEOUT_SECS    = 5/QUOTE_TIMEOUT_SECS    = 20/' /root/kalshi-bot-v2/combo_scanner.py
+grep "QUOTE_TIMEOUT_SECS" /root/kalshi-bot-v2/combo_scanner.py | head -1
+python combo_scanner.py
+python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Quote|No quote|EXECUTED|rejected" | head -20
+grep -n "def build_highconf_combo" /root/kalshi-bot-v2/combo_scanner.py
+python3 -c "from combo_scanner import build_highconf_combo; print('OK')"
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
+c = f.read()
+f.close()
+c = c.replace(
+    '    # ── HIGH CONFIDENCE ────────────────────────────────────────────────\n    highconf = build_highconf_combo(legs)',
+    '    # ── HIGH CONFIDENCE ────────────────────────────────────────────────\n    from combo_scanner import build_highconf_combo as _bhc\n    highconf = _bhc(legs)'
+)
+open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 combo_scanner.py 2>&1 | grep -E "MOONSHOT|HIGH CONF|DRY RUN|No valid"
+python3 combo_scanner.py --live 2>&1 | grep -E "MOONSHOT|HIGH CONF|Quote|No quote|EXECUTED|rejected|payout" | head -20
+python3 -c "
+import requests, base64, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+path = '/trade-api/v2/communications/rfqs'
+r = requests.get(f'https://api.elections.kalshi.com{path}',
+    headers=pss_headers('GET', path), timeout=8)
+print(r.status_code)
+import json
+data = r.json()
+rfqs = data.get('rfqs', [])
+print(f'Open RFQs: {len(rfqs)}')
+for rfq in rfqs[:3]:
+    print(f'  {rfq.get(\"id\")} status={rfq.get(\"status\")} created={rfq.get(\"created_ts\",\"\")[:19]}')
+" 2>&1 | grep -v DEBUG
+python3 -c "
+import requests, base64, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+BASE = 'https://api.elections.kalshi.com'
+
+# Get all open RFQs
+path = '/trade-api/v2/communications/rfqs'
+r = requests.get(f'{BASE}{path}', headers=pss_headers('GET', path), timeout=8)
+rfqs = r.json().get('rfqs', [])
+print(f'Cancelling {len(rfqs)} RFQs...')
+
+cancelled = 0
+for rfq in rfqs:
+    rfq_id = rfq.get('id')
+    cp = f'/trade-api/v2/communications/rfqs/{rfq_id}/cancel'
+    r2 = requests.put(f'{BASE}{cp}', headers=pss_headers('PUT', cp), timeout=8)
+    if r2.status_code in (200, 204):
+        cancelled += 1
+    time.sleep(0.1)
+
+print(f'Cancelled {cancelled}/{len(rfqs)} RFQs')
+" 2>&1 | grep -v DEBUG
+python3 -c "
+import requests, base64, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+BASE = 'https://api.elections.kalshi.com'
+
+# Try one RFQ with different methods
+path = '/trade-api/v2/communications/rfqs'
+r = requests.get(f'{BASE}{path}', headers=pss_headers('GET', path), timeout=8)
+rfqs = r.json().get('rfqs', [])
+rfq_id = rfqs[0]['id']
+print(f'Testing RFQ: {rfq_id}')
+
+for method in ['DELETE', 'PUT', 'POST']:
+    cp = f'/trade-api/v2/communications/rfqs/{rfq_id}'
+    if method == 'PUT':
+        cp += '/cancel'
+    fn = getattr(requests, method.lower())
+    r2 = fn(f'{BASE}{cp}', headers=pss_headers(method, cp), timeout=8)
+    print(f'{method}: {r2.status_code} {r2.text[:100]}')
+" 2>&1 | grep -v DEBUG
+python3 -c "
+import requests, base64, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts,
+            'Content-Type': 'application/json'}
+
+BASE = 'https://api.elections.kalshi.com'
+path = '/trade-api/v2/communications/rfqs'
+r = requests.get(f'{BASE}{path}', headers=pss_headers('GET', path), timeout=8)
+rfqs = r.json().get('rfqs', [])
+print(f'Cancelling {len(rfqs)} RFQs...')
+
+cancelled = 0
+for rfq in rfqs:
+    rfq_id = rfq.get('id')
+    cp = f'/trade-api/v2/communications/rfqs/{rfq_id}/cancel'
+    r2 = requests.put(f'{BASE}{cp}', headers=pss_headers('PUT', cp), json={}, timeout=8)
+    if r2.status_code in (200, 204):
+        cancelled += 1
+    time.sleep(0.1)
+
+print(f'Cancelled {cancelled}/{len(rfqs)}')
+
+# Verify
+r3 = requests.get(f'{BASE}{path}', headers=pss_headers('GET', path), timeout=8)
+print(f'Remaining open: {len(r3.json().get(\"rfqs\", []))}')
+" 2>&1 | grep -v DEBUG
+python3 -c "
+import requests, base64, time, json
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+BASE = 'https://api.elections.kalshi.com'
+path = '/trade-api/v2/communications/rfqs'
+r = requests.get(f'{BASE}{path}', headers=pss_headers('GET', path), timeout=8)
+rfqs = r.json().get('rfqs', [])
+# Show first RFQ in full
+print(json.dumps(rfqs[0], indent=2)[:400])
+" 2>&1 | grep -v DEBUG
+python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
+python3 -c "
+import requests, base64, time
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+BASE    = 'https://api.elections.kalshi.com'
+rfq_id  = 'da115c59-2bf4-4a21-8173-77ff52f797c1'
+user_id = config.KALSHI_USER_ID
+path    = '/trade-api/v2/communications/quotes'
+url     = f'{BASE}{path}?rfq_id={rfq_id}&rfq_creator_user_id={user_id}'
+r = requests.get(url, headers=pss_headers('GET', path), timeout=8)
+print(f'Status: {r.status_code}')
+import json
+data = r.json()
+quotes = data.get('quotes', [])
+print(f'Quotes returned: {len(quotes)}')
+if quotes:
+    print(json.dumps(quotes[0], indent=2)[:300])
+else:
+    print('No quotes — market makers not responding')
+    print(json.dumps(data, indent=2)[:200])
+" 2>&1 | grep -v DEBUG
+python3 -c "
+import requests, base64, time, json
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding as asym_padding
+from core.config import config
+
+with open(config.KALSHI_KEY_FILE, 'rb') as f:
+    private_key = serialization.load_pem_private_key(f.read(), password=None)
+
+def pss_headers(method, path):
+    ts  = str(int(time.time() * 1000))
+    sig = private_key.sign((ts+method+path).encode(),
+          asym_padding.PSS(mgf=asym_padding.MGF1(hashes.SHA256()),
+          salt_length=asym_padding.PSS.MAX_LENGTH), hashes.SHA256())
+    return {'KALSHI-ACCESS-KEY': config.KALSHI_KEY_ID,
+            'KALSHI-ACCESS-SIGNATURE': base64.b64encode(sig).decode(),
+            'KALSHI-ACCESS-TIMESTAMP': ts}
+
+BASE    = 'https://api.elections.kalshi.com'
+rfq_id  = 'da115c59-2bf4-4a21-8173-77ff52f797c1'
+user_id = config.KALSHI_USER_ID
+path    = '/trade-api/v2/communications/quotes'
+url     = f'{BASE}{path}?rfq_id={rfq_id}&rfq_creator_user_id={user_id}'
+r = requests.get(url, headers=pss_headers('GET', path), timeout=8)
+quotes = r.json().get('quotes', [])
+for q in quotes:
+    print(json.dumps(q, indent=2))
+    print('---')
+" 2>&1 | grep -v DEBUG
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
+c = f.read()
+f.close()
+
+old = '''            yes_q = [q for q in qs if float(q.get(\'yes_bid_dollars\',0) or 0) >= 0.05 and q.get(\'status\')==\'open\']
+            if yes_q:
+                quote = max(yes_q, key=lambda q: float(q.get(\'yes_bid_dollars\',0)))
+                log.info(f"[Combo] Best quote: yes_bid={quote[\'yes_bid_dollars\']} contracts={quote.get(\'yes_contracts_fp\')}")
+                break'''
+
+new = '''            # Accept YES quotes OR NO quotes (convert no_bid to implied yes price)
+            valid_q = []
+            for q in qs:
+                if q.get('status') != 'open':
+                    continue
+                yes_bid = float(q.get('yes_bid_dollars', 0) or 0)
+                no_bid  = float(q.get('no_bid_dollars', 0) or 0)
+                # If yes_bid available use it, else derive from no_bid
+                if yes_bid >= 0.05:
+                    q['_effective_yes'] = yes_bid
+                    valid_q.append(q)
+                elif no_bid > 0:
+                    implied_yes = round(1.0 - no_bid, 4)
+                    if implied_yes >= 0.05:
+                        q['_effective_yes'] = implied_yes
+                        valid_q.append(q)
+            if valid_q:
+                quote = max(valid_q, key=lambda q: q['_effective_yes'])
+                eff   = quote['_effective_yes']
+                log.info(f"[Combo] Best quote: effective_yes={eff:.4f} contracts={quote.get('no_contracts_fp') or quote.get('yes_contracts_fp')}")
+                break'''
+
+c = c.replace(old, new)
+
+# Also fix the evaluation to use effective yes price
+old2 = '''    yes_bid   = float(quote.get(\'yes_bid_dollars\', 0) or 0)
+    contracts = float(quote.get(\'yes_contracts_fp\', 1) or 1)
+    ev        = _evaluate_quote(candidate, yes_bid, stake_dollars)
+    log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
+
+    # Minimum payout check — reject if less than 10x
+    min_payout = 10.0
+    actual_payout = stake_dollars / yes_bid if yes_bid > 0 else 0'''
+
+new2 = '''    yes_bid   = float(quote.get('_effective_yes', 0) or quote.get('yes_bid_dollars', 0) or 0)
+    contracts = float(quote.get('no_contracts_fp') or quote.get('yes_contracts_fp', 1) or 1)
+    ev        = _evaluate_quote(candidate, yes_bid, stake_dollars)
+    log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
+
+    # Minimum payout check — reject if less than 10x
+    min_payout = 10.0
+    actual_payout = stake_dollars / yes_bid if yes_bid > 0 else 0'''
+
+c = c.replace(old2, new2)
+open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote|rejected|payout" | head -15
+python3 << 'PYEOF'
+f = open('/root/kalshi-bot-v2/combo_scanner.py', 'r')
+c = f.read()
+f.close()
+c = c.replace('    min_payout = 10.0', '    min_payout = 5.0')
+open('/root/kalshi-bot-v2/combo_scanner.py', 'w').write(c)
+print("Done")
+PYEOF
+
+python3 combo_scanner.py --live 2>&1 | grep -E "Quote|EXECUTED|rejected|payout" | head -10
+git add -A && git commit -m "fix: accept NO-side quotes, convert to implied yes price" && git push origin master
+python3 -c "
+from combo_scanner import scan_all_props, build_best_combo, build_highconf_combo
+import re
+
+legs = scan_all_props()
+print(f'Total legs: {len(legs)}')
+
+games = {}
+for l in legs:
+    m = re.search(r'\d{2}[A-Z]{3}\d{2}([A-Z]{6})', l.ticker.split('-')[1])
+    code = m.group(1) if m else '????'
+    t1, t2 = code[:3], code[3:6]
+    games.setdefault(f'{t1} vs {t2}', []).append(l)
+
+for game, gl in sorted(games.items()):
+    print(f'{game}: {len(gl)} legs')
+" 2>&1 | grep -v DEBUG | grep -v WARNING | grep -v NBAStats
+screen -r combo
+cd /root/kalshi-bot-v2 && grep "from combo_scanner import build_highconf_combo" combo_scanner.py | head -3
+source /root/kalshi-bot/bin/activate
+python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
+python combo_scanner.py
+cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
+python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
+cd /root/kalshi-bot-v2 && python3 combo_scanner.py --live 2>&1 | grep -E "RFQ|Quote|EXECUTED|No quote" | head -10
