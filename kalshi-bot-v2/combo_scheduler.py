@@ -103,9 +103,21 @@ def run_nightly_audit():
         log.warning(f"Nightly audit failed: {e}")
 
 
+def run_advanced_fetch():
+    """Run advanced stats fetch nightly."""
+    try:
+        from data.advanced_fetcher import run_full_fetch
+        log.info("Running advanced stats fetch...")
+        results = run_full_fetch()
+        log.info(f"Advanced fetch complete: {results}")
+    except Exception as e:
+        log.warning(f"Advanced fetch failed: {e}")
+
+
 def main():
     log.info("Combo Scheduler starting")
     warm_cache()
+    run_advanced_fetch()
     run_nightly_audit()
     log.info("Fetching today's NBA schedule...")
 

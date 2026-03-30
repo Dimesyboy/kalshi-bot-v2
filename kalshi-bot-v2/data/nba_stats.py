@@ -395,6 +395,52 @@ def score_prop_leg(ticker: str) -> dict:
     reason = (f"{avgs['player_name']} avg {avg_stat:.1f} vs threshold {threshold} "
               f"(ratio={ratio:.2f}{hit_str}) → conf={confidence:.2f}{injury_note}")
 
+    # ── Contextual adjustments (pace, matchup, B2B, home/away) ───────
+    try:
+        import re as _re
+        from data.advanced_fetcher import (
+            get_matchup_pace, get_defense_multiplier,
+            get_schedule_context, get_league_avg_pace,
+        )
+        from datetime import date as _date
+
+        m = _re.search(r'[0-9]{2}[A-Z]{3}[0-9]{2}([A-Z]{3,6})', ticker)
+        team_part   = m.group(1) if m else ''
+        away_abbr   = team_part[:3] if len(team_part) >= 6 else team_part[:3]
+        home_abbr   = team_part[3:6] if len(team_part) >= 6 else team_part[:3]
+        player_team = ticker.split('-')[2][:3] if len(ticker.split('-')) > 2 else ''
+        opponent    = home_abbr if player_team == away_abbr else away_abbr
+
+        today        = _date.today().strftime('%Y-%m-%d')
+        league_pace  = get_league_avg_pace()
+        game_pace    = get_matchup_pace(player_team, opponent) if opponent else league_pace
+        pace_factor  = game_pace / league_pace if league_pace > 0 else 1.0
+        pace_adj     = round(max(-0.08, min(0.08, (pace_factor - 1.0) * 0.5)), 3)
+
+        series       = ticker.split('-')[0]
+        stat_type    = {'KXNBAPTS':'pts','KXNBAREB':'reb','KXNBAAST':'ast',
+                        'KXNBA3PT':'pts','KXNBASTL':'stl','KXNBABLK':'blk'}.get(series,'pts')
+        def_mult     = get_defense_multiplier(opponent, stat_type) if opponent else 1.0
+        matchup_adj  = round(max(-0.08, min(0.08, (def_mult - 1.0) * 0.6)), 3)
+
+        ctx          = get_schedule_context(player_team, today)
+        b2b_adj      = -0.06 if ctx.get('is_b2b_road') else -0.03 if ctx.get('is_b2b') else 0.0
+        home_adj     = 0.02 if ctx.get('is_home') else -0.01
+
+        context_adj  = pace_adj + matchup_adj + b2b_adj + home_adj
+        confidence   = round(max(0.0, min(1.0, confidence + context_adj)), 4)
+
+        ctx_parts = []
+        if abs(pace_adj)    >= 0.01: ctx_parts.append(f"pace{pace_adj:+.2f}")
+        if abs(matchup_adj) >= 0.01: ctx_parts.append(f"matchup{matchup_adj:+.2f}")
+        if b2b_adj != 0:             ctx_parts.append(f"b2b{b2b_adj:+.2f}")
+        if home_adj != 0:            ctx_parts.append(f"loc{home_adj:+.2f}")
+        if ctx_parts:
+            reason += f" [{','.join(ctx_parts)}]"
+
+    except Exception:
+        pass
+
     return {
         'confidence':   confidence,
         'avg_stat':     avg_stat,

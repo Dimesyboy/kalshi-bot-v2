@@ -407,6 +407,20 @@ def run_bot():
                             bot_orders.add(order_id)
                             save_bot_orders(bot_orders)
                             reconciler.register_bot_order(order_id, client_order_id)
+                            try:
+                                from data.positions_db import record_order
+                                record_order(
+                                    order_id        = order_id,
+                                    client_order_id = client_order_id,
+                                    ticker          = trade_signal.market_ticker,
+                                    strategy        = trade_signal.strategy_name,
+                                    side            = str(trade_signal.side).split(".")[-1].lower(),
+                                    price_cents     = trade_signal.price,
+                                    contracts       = trade_signal.contracts,
+                                    source          = 'bot',
+                                )
+                            except Exception as _dbe:
+                                log.debug(f"[Bot] DB order record failed: {_dbe}")
 
                             order_mgr.add_pending(
                                 signal      = trade_signal,

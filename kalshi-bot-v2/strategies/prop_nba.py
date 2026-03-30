@@ -72,9 +72,17 @@ class NBAPropStrategy(BaseStrategy):
         if series not in PROP_SERIES:
             return None
 
-        # Hard cap — stop after MAX_TRADES_PER_SESSION
+        # Hard cap — check Kalshi directly for resting orders
         if self._session_trades >= self.MAX_TRADES_PER_SESSION:
             return None
+
+        # Also check reconciler exposure as safety net
+        try:
+            from core.reconciler import reconciler
+            if reconciler.get_total_exposure() >= self.MAX_TRADES_PER_SESSION:
+                return None
+        except Exception:
+            pass
 
         # Skip already evaluated
         if ticker in self._scanned_tickers:
@@ -116,6 +124,14 @@ class NBAPropStrategy(BaseStrategy):
                 pass
 
         if hit_rate < MIN_HIT_RATE and hit_rate > 0:
+            try:
+                from data.positions_db import record_signal
+                record_signal(ticker=ticker, strategy=self.name, side='yes',
+                    price_cents=yes_price, confidence=conf, edge=edge,
+                    hit_rate=hit_rate, source='bot', acted_on=False,
+                    skip_reason=f"hit_rate {hit_rate:.0%} below {MIN_HIT_RATE:.0%}")
+            except Exception:
+                pass
             return None
 
         # Build signal
@@ -143,6 +159,24 @@ class NBAPropStrategy(BaseStrategy):
             f"conf={conf:.2f} edge={edge:+.2f} hr={hit_rate:.0%} "
             f"[{self._session_trades}/{self.MAX_TRADES_PER_SESSION}]"
         )
+
+        # Record signal to DB
+        try:
+            from data.positions_db import record_signal
+            record_signal(
+                ticker      = ticker,
+                strategy    = self.name,
+                side        = 'yes',
+                price_cents = yes_price,
+                confidence  = conf,
+                edge        = edge,
+                hit_rate    = hit_rate,
+                reason      = l.reasoning if hasattr(result, "reasoning") else f"{player} {thr}+ {stat}",
+                source      = 'bot',
+                acted_on    = True,
+            )
+        except Exception as _e:
+            log.debug(f"[PropNBA] Signal DB record failed: {_e}")
 
         return make_signal(
             market        = market,
