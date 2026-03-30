@@ -51,7 +51,7 @@ MIN_LEG_CONFIDENCE    = 0.65   # Each leg must clear this
 MIN_COMBINED_CONF     = 0.15   # Floor for full parlay (combined probability)
 MAX_COMBO_STAKE       = 5.00   # dollars — fixed until win rate proven
 MIN_LEGS              = 4      # Minimum legs for a valid combo
-QUOTE_TIMEOUT_SECS    = 5      # How long to wait for market maker quote
+QUOTE_TIMEOUT_SECS    = 20      # How long to wait for market maker quote
 QUOTE_POLL_INTERVAL   = 0.5    # Poll every 500ms
 
 
@@ -359,10 +359,26 @@ def submit_rfq(candidate: ComboCandidate,
         try:
             url  = f"{BASE}{qp}?rfq_id={rfq_id}&rfq_creator_user_id={user_id}"
             qs   = requests.get(url, headers=_pss_headers("GET", qp), timeout=8).json().get('quotes', [])
-            yes_q = [q for q in qs if float(q.get('yes_bid_dollars',0) or 0) >= 0.05 and q.get('status')=='open']
-            if yes_q:
-                quote = max(yes_q, key=lambda q: float(q.get('yes_bid_dollars',0)))
-                log.info(f"[Combo] Best quote: yes_bid={quote['yes_bid_dollars']} contracts={quote.get('yes_contracts_fp')}")
+            # Accept YES quotes OR NO quotes (convert no_bid to implied yes price)
+            valid_q = []
+            for q in qs:
+                if q.get('status') != 'open':
+                    continue
+                yes_bid = float(q.get('yes_bid_dollars', 0) or 0)
+                no_bid  = float(q.get('no_bid_dollars', 0) or 0)
+                # If yes_bid available use it, else derive from no_bid
+                if yes_bid >= 0.05:
+                    q['_effective_yes'] = yes_bid
+                    valid_q.append(q)
+                elif no_bid > 0:
+                    implied_yes = round(1.0 - no_bid, 4)
+                    if implied_yes >= 0.05:
+                        q['_effective_yes'] = implied_yes
+                        valid_q.append(q)
+            if valid_q:
+                quote = max(valid_q, key=lambda q: q['_effective_yes'])
+                eff   = quote['_effective_yes']
+                log.info(f"[Combo] Best quote: effective_yes={eff:.4f} contracts={quote.get('no_contracts_fp') or quote.get('yes_contracts_fp')}")
                 break
         except Exception as e:
             log.debug(f"[Combo] Poll error: {e}")
@@ -374,13 +390,13 @@ def submit_rfq(candidate: ComboCandidate,
 
     # ── Step 4: Evaluate quote ─────────────────────────────────────────
     quote_id  = quote.get('id')
-    yes_bid   = float(quote.get('yes_bid_dollars', 0) or 0)
-    contracts = float(quote.get('yes_contracts_fp', 1) or 1)
+    yes_bid   = float(quote.get('_effective_yes', 0) or quote.get('yes_bid_dollars', 0) or 0)
+    contracts = float(quote.get('no_contracts_fp') or quote.get('yes_contracts_fp', 1) or 1)
     ev        = _evaluate_quote(candidate, yes_bid, stake_dollars)
     log.info(f"[Combo] Quote: yes_bid={yes_bid:.4f} EV={ev:+.3f}")
 
     # Minimum payout check — reject if less than 10x
-    min_payout = 10.0
+    min_payout = 5.0
     actual_payout = stake_dollars / yes_bid if yes_bid > 0 else 0
     if actual_payout < min_payout:
         log.info(f"[Combo] Quote rejected — payout {actual_payout:.1f}x below {min_payout}x minimum")
@@ -436,7 +452,7 @@ LEG_MAX_BID = 0.85   # Cap at 88% — above this barely adds payout
 
 # Combo sizing — MOONSHOT mode (default)
 MIN_COMBO_LEGS       = 6
-MAX_COMBO_LEGS       = 12
+MAX_COMBO_LEGS       = 10
 MIN_COMBINED_CONF    = 0.005
 MIN_PAYOUT_MULT      = 15.0
 
@@ -565,8 +581,8 @@ def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
     candidates = []
     legs       = scan_all_props()
 
-    # ── Price monitoring (5 min window) ───────────────────────────────
-    if not dry_run and legs:
+    # ── Price monitoring DISABLED ─────────────────────────────────────
+    if False and not dry_run and legs:
         log.info("[Combo] Running price monitor (5 min)...")
         from data.prop_scanner import apply_price_monitoring
         # Convert ComboLegs to dicts for price monitor
@@ -603,7 +619,8 @@ def scan_and_execute(dry_run: bool = True) -> list[ComboCandidate]:
                 _log_combo_trade(moonshot, quote, mode="moonshot")
 
     # ── HIGH CONFIDENCE ────────────────────────────────────────────────
-    highconf = build_highconf_combo(legs)
+    from combo_scanner import build_highconf_combo as _bhc
+    highconf = _bhc(legs)
     if highconf:
         candidates.append(highconf)
         if dry_run:
