@@ -158,36 +158,11 @@ def get_schedule(x_api_key: str = Header(...)):
 @app.get("/api/stats")
 def get_stats(x_api_key: str = Header(...)):
     verify_key(x_api_key)
-    import csv
-    from collections import defaultdict
-
-    result = {}
-
-    # Paper trades v2
-    paper_file = "/root/kalshi-bot-v2/data/paper_trades.csv"
-    if os.path.exists(paper_file):
-        rows     = list(csv.DictReader(open(paper_file)))
-        resolved = [r for r in rows if r.get('resolved','') not in ('','no')]
-        wins     = sum(1 for r in resolved if float(r.get('hyp_pnl',0) or 0) > 0)
-        pnl      = sum(float(r.get('hyp_pnl',0) or 0) for r in resolved)
-        result["paper"] = {
-            "total":    len(rows),
-            "resolved": len(resolved),
-            "wins":     wins,
-            "win_rate": round(wins/len(resolved)*100, 1) if resolved else 0,
-            "pnl":      round(pnl, 2)
-        }
-
-    # Combo stats
-    combo_file = "/root/kalshi-bot-v2/data/combo_trades.json"
-    if os.path.exists(combo_file):
-        combos = json.load(open(combo_file))
-        result["combos"] = {
-            "total":  len(combos),
-            "spent":  len(combos) * 5.0,
-        }
-
-    return result
+    try:
+        from data.pnl_report import get_full_pnl
+        return get_full_pnl()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

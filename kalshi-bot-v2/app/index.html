@@ -400,32 +400,68 @@ async function loadStats() {
   try {
     const data = await api('/api/stats');
     let html = '';
-    if (data.paper) {
-      const p = data.paper;
+
+    // Total revenue banner
+    const rev = data.total_revenue || 0;
+    html += `<div class="balance-card" style="margin:0 0 12px">
+      <div class="label">Total Revenue</div>
+      <div class="amount">$${rev.toFixed(2)}</div>
+      <div class="sub">${data.total_trades || 0} settled trades</div>
+    </div>`;
+
+    // Combos
+    const c = data.combos;
+    if (c && c.n) {
+      const pnl = c.revenue;
       html += `<div class="card">
         <div class="card-header">
-          <span class="card-title">V2 Paper Trader</span>
-          <span class="badge ${p.pnl >= 0 ? 'badge-green' : 'badge-red'}">
-            $${p.pnl >= 0 ? '+' : ''}${p.pnl}
-          </span>
+          <span class="card-title">🎯 Combos</span>
+          <span class="badge ${pnl >= 0 ? 'badge-green' : 'badge-red'}">$${pnl.toFixed(2)}</span>
         </div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${c.wins}W / ${c.losses}L</span></div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${c.win_rate}%</span></div>
+      </div>`;
+    }
+
+    // Props
+    const p = data.props;
+    if (p && p.n) {
+      html += `<div class="card">
+        <div class="card-header">
+          <span class="card-title">🏀 Props</span>
+          <span class="badge ${p.revenue >= 0 ? 'badge-green' : 'badge-red'}">$${p.revenue.toFixed(2)}</span>
+        </div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${p.wins}W / ${p.losses}L</span></div>
         <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${p.win_rate}%</span></div>
-        <div class="leg"><span class="leg-name">Resolved</span><span class="leg-conf">${p.resolved}/${p.total}</span></div>
       </div>`;
     }
-    if (data.combos) {
+
+    // Game lines
+    const g = data.games;
+    if (g && g.n) {
       html += `<div class="card">
         <div class="card-header">
-          <span class="card-title">Combo Trades</span>
-          <span class="badge badge-purple">${data.combos.total} placed</span>
+          <span class="card-title">🏆 Game Lines</span>
+          <span class="badge ${g.revenue >= 0 ? 'badge-green' : 'badge-red'}">$${g.revenue.toFixed(2)}</span>
         </div>
-        <div class="leg"><span class="leg-name">Total Spent</span><span class="leg-conf">$${data.combos.spent}</span></div>
+        <div class="leg"><span class="leg-name">Record</span><span class="leg-conf">${g.wins}W / ${g.losses}L</span></div>
+        <div class="leg"><span class="leg-name">Win Rate</span><span class="leg-conf">${g.win_rate}%</span></div>
       </div>`;
     }
+
+    // Top winners
+    if (data.top_winners && data.top_winners.length) {
+      html += `<div class="card"><div class="card-header"><span class="card-title">🥇 Top Wins</span></div>`;
+      data.top_winners.forEach(w => {
+        html += `<div class="leg"><span class="leg-name">${w.ticker.slice(-20)}</span><span class="leg-conf">+$${w.revenue.toFixed(2)}</span></div>`;
+      });
+      html += `</div>`;
+    }
+
     document.getElementById('stats-content').innerHTML = html || '<div class="error">No stats yet</div>';
   } catch(e) {
     document.getElementById('stats-content').innerHTML =
-      '<div class="error">Error loading stats</div>';
+      '<div class="error">Error: ' + e.message + '</div>';
   }
 }
 
