@@ -109,7 +109,8 @@ class OrderManager:
             "placed_time":  now,
             "close_time":   getattr(signal, "close_time", None),
             "market_status": getattr(signal, "market_status", "active"),
-            "is_bot":       True,
+            "is_bot":           True,
+            "client_order_id":  str(getattr(signal, 'client_order_id', '')),
         }
         with self._lock:
             self._pending[order_id] = pending
@@ -117,6 +118,21 @@ class OrderManager:
         log.info(f"[OrderManager] PENDING {signal.market_ticker} "
                  f"{str(signal.side).split(".")[-1].upper()} @ {entry_price}c x{contracts} "
                  f"order={order_id[:8]}")
+
+        try:
+            from data.positions_db import record_order
+            record_order(
+                order_id        = order_id,
+                client_order_id = str(getattr(signal, "client_order_id", "")),
+                ticker          = signal.market_ticker,
+                strategy        = getattr(signal, "strategy_name", ""),
+                side            = str(signal.side).split(".")[-1].lower(),
+                price_cents     = entry_price,
+                contracts       = contracts,
+                source          = "bot",
+            )
+        except Exception as _dbe:
+            log.debug(f"[OrderManager] DB order record failed: {_dbe}")
 
     def poll_pending(self, client):
         """
@@ -264,6 +280,67 @@ class OrderManager:
 
         log.info(f"[OrderManager] FILLED {ticker} {po['side'].upper()} "
                  f"@ {entry}c x{filled} → positions.json")
+        try:
+            from data.positions_db import record_fill
+            from core.reconciler import reconciler
+            source   = "bot" if reconciler.is_bot_trade(order_id, "") else "manual"
+            reason   = po.get("reason", "")
+            conf = edge = hr = 0.0
+            try:
+                if "conf=" in reason: conf = float(reason.split("conf=")[1].split(" ")[0])
+                if "edge=" in reason: edge = float(reason.split("edge=")[1].split(" ")[0].replace("+",""))
+                if "hr=" in reason:   hr   = float(reason.split("hr=")[1].split("%")[0]) / 100
+            except Exception: pass
+            record_fill(
+                ticker          = ticker,
+                order_id        = order_id,
+                client_order_id = po.get("client_order_id", ""),
+                side            = po.get("side", "yes"),
+                qty             = filled,
+                fill_price      = entry,
+                source          = source,
+                strategy        = po.get("strategy", ""),
+                confidence      = conf,
+                edge            = edge,
+                hit_rate        = hr,
+                reason          = reason,
+            )
+        except Exception as _dbe:
+            log.debug(f"[OrderManager] DB fill record failed: {_dbe}")
+
+        try:
+            from data.positions_db import record_fill
+            from core.reconciler import reconciler
+            source   = 'bot' if reconciler.is_bot_trade(order_id, '') else 'manual'
+            strategy = po.get('strategy', '')
+            # Extract confidence/edge/hit_rate from reason string
+            reason   = po.get('reason', '')
+            conf = edge = hr = 0.0
+            try:
+                if 'conf=' in reason:
+                    conf = float(reason.split('conf=')[1].split(' ')[0])
+                if 'edge=' in reason:
+                    edge = float(reason.split('edge=')[1].split(' ')[0].replace('+',''))
+                if 'hr=' in reason:
+                    hr = float(reason.split('hr=')[1].split('%')[0]) / 100
+            except Exception:
+                pass
+            record_fill(
+                ticker          = ticker,
+                order_id        = order_id,
+                client_order_id = po.get('client_order_id', ''),
+                side            = po.get('side', 'yes'),
+                qty             = filled,
+                fill_price      = entry,
+                source          = source,
+                strategy        = strategy,
+                confidence      = conf,
+                edge            = edge,
+                hit_rate        = hr,
+                reason          = reason,
+            )
+        except Exception as _e:
+            log.debug(f"[OrderManager] DB fill record failed: {_e}")
 
     def _handle_partial(self, order_id: str, po: dict, filled: int):
         """Partially filled — create/update position with actual fill count."""

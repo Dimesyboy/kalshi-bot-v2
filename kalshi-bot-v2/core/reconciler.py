@@ -105,6 +105,26 @@ class Reconciler:
 
     # ── Sync ───────────────────────────────────────────────────────────
 
+    def _record_new_settlements(self, pa):
+        """Check for new settlements and record them to positions_db."""
+        try:
+            from data.positions_db import record_settlement, get_open_positions
+            open_tickers = {p['ticker'] for p in get_open_positions()}
+            if not open_tickers:
+                return
+
+            settlements = pa.get_settlements(limit=50)
+            for s in (settlements.settlements or []):
+                ticker  = str(s.ticker or '')
+                revenue = (s.revenue or 0) / 100.0
+                if ticker in open_tickers:
+                    source = 'bot' if self.is_bot_trade('', '') else 'manual'
+                    record_settlement(ticker, revenue, source=source)
+                    log.info(f"[Recon] Settlement recorded: {ticker[-30:]} "
+                            f"revenue=${revenue:.2f}")
+        except Exception as e:
+            log.debug(f"[Recon] Settlement recording failed: {e}")
+
     def sync(self):
         """Pull current state from Kalshi and update internal state."""
         try:
@@ -160,6 +180,9 @@ class Reconciler:
                 self._bot_pnl       = bot_pnl
                 self._manual_pnl    = manual_pnl
                 self._last_sync     = datetime.now(timezone.utc).isoformat()
+
+            # Record any new settlements
+            self._record_new_settlements(pa)
 
             self._save_state()
             log.debug(f"[Recon] Synced: {len(new_pos)} positions, "
