@@ -55,7 +55,7 @@ from strategies.cross_sport import ClosingLine
 from order_manager import OrderManager
 from watcher import PriceWatcher
 from reconcile import recover_on_startup
-from telegram import alert_trade, send_cycle_report, send_startup
+from tg_notify import alert_trade, send_cycle_report, send_startup
 
 # ── Strategy registry ──────────────────────────────────────────────────────
 STRATEGIES = [
