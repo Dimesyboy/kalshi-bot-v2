@@ -102,6 +102,98 @@ def init_advanced_tables():
 
 # ── Team Stats ─────────────────────────────────────────────────────────────
 
+def fetch_player_advanced():
+    """
+    Fetch player USG% from ESPN byathlete endpoint.
+    Stores normalized USG% (0.10-0.40 range, league avg ~0.20).
+    """
+    log.info("[AdvFetcher] Fetching player advanced stats...")
+    try:
+        # Fetch in batches of 100
+        all_athletes = []
+        page = 1
+        while True:
+            time.sleep(0.3)
+            r = requests.get(
+                f"{ESPN_WEB}/statistics/byathlete",
+                params={'region':'us','lang':'en','limit':'100',
+                        'season':'2026','seasontype':'2','page':str(page)},
+                headers=HEADERS, timeout=10
+            )
+            if r.status_code != 200:
+                break
+            data  = r.json()
+            batch = data.get('athletes', [])
+            if not batch:
+                break
+            all_athletes.extend(batch)
+            log.debug(f"[AdvFetcher] Page {page}: {len(batch)} athletes")
+            if len(batch) < 100:
+                break
+            page += 1
+            if page > 8:  # safety cap ~800 players
+                break
+
+        log.info(f"[AdvFetcher] Got {len(all_athletes)} athletes")
+
+        # League avg FGA+0.44*FTA+TOV per minute (for normalization)
+        # NBA league avg USG% ~ 0.20, so we normalize to that
+        raw_usgs = []
+        parsed   = []
+        for a in all_athletes:
+            try:
+                ath      = a.get('athlete', {})
+                name     = ath.get('displayName', '')
+                team     = (ath.get('team') or {}).get('abbreviation', '')
+                pid      = str(ath.get('id', ''))
+                gen_vals = a['categories'][0]['values']
+                off_vals = a['categories'][1]['values']
+                mpg      = float(gen_vals[1]) if len(gen_vals) > 1 else 0
+                tov      = float(gen_vals[2]) if len(gen_vals) > 2 else 0
+                fga      = float(off_vals[2]) if len(off_vals) > 2 else 0
+                fta      = float(off_vals[8]) if len(off_vals) > 8 else 0
+                if mpg < 5:
+                    continue
+                raw = (fga + 0.44 * fta + tov) / mpg
+                raw_usgs.append(raw)
+                parsed.append((pid, name, team, mpg, fga, fta, tov, raw))
+            except Exception:
+                continue
+
+        if not raw_usgs:
+            log.warning("[AdvFetcher] No player data parsed")
+            return 0
+
+        # Normalize: scale so mean = 0.20 (league avg USG%)
+        avg_raw = sum(raw_usgs) / len(raw_usgs)
+        scale   = 0.20 / avg_raw if avg_raw > 0 else 1.0
+
+        conn    = get_db()
+        updated = datetime.now(timezone.utc).isoformat()[:16]
+        count   = 0
+        for pid, name, team, mpg, fga, fta, tov, raw in parsed:
+            usg = round(min(0.40, max(0.10, raw * scale)), 3)
+            conn.execute("""
+                INSERT OR REPLACE INTO player_advanced
+                (player_id, player_name, team_abbr, usg_pct,
+                 usg_pct_home, usg_pct_away,
+                 min_home, min_away, pts_home, pts_away,
+                 reb_home, reb_away, ast_home, ast_away, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """, (pid, name, team, usg, usg, usg,
+                  mpg, mpg, 0, 0, 0, 0, 0, 0, updated))
+            count += 1
+
+        conn.commit()
+        conn.close()
+        log.info(f"[AdvFetcher] Stored {count} player USG% records")
+        return count
+
+    except Exception as e:
+        log.warning(f"[AdvFetcher] Player advanced fetch failed: {e}")
+        return 0
+
+
 def fetch_team_stats():
     """
     Fetch all 30 teams' stats from ESPN byteam endpoint.
@@ -357,6 +449,45 @@ def get_team_off_rating(team_abbr: str) -> float:
         conn.close()
 
 
+
+def get_player_usg(player_name: str) -> float:
+    """Get player USG% (0.10-0.40 scale, league avg ~0.20)."""
+    conn = get_db()
+    try:
+        first = player_name.split()[0]
+        row = conn.execute(
+            "SELECT usg_pct FROM player_advanced WHERE player_name LIKE ?",
+            (f"%{first}%",)
+        ).fetchone()
+        if row and row['usg_pct']:
+            return float(row['usg_pct'])
+    except Exception:
+        pass
+    finally:
+        conn.close()
+    return 0.20
+
+
+def get_player_home_away_split(player_name: str, stat: str, is_home: bool) -> float:
+    """Get player stat average. Home/away splits use season avg."""
+    try:
+        import sqlite3 as _sq, json as _js
+        conn2 = _sq.connect(DB_PATH)
+        rows = conn2.execute("SELECT data FROM player_averages").fetchall()
+        conn2.close()
+        first = player_name.split()[0].lower()
+        stat_map = {'pts': 'avg_points', 'reb': 'avg_rebounds',
+                    'ast': 'avg_assists', 'min': 'avg_minutes'}
+        col = stat_map.get(stat, 'avg_points')
+        for row in rows:
+            d = _js.loads(row[0])
+            if first in d.get('player_name', '').lower():
+                return float(d.get(col, 0) or 0)
+    except Exception:
+        pass
+    return 0.0
+
+
 def get_league_avg_pace() -> float:
     conn = get_db()
     try:
@@ -433,8 +564,9 @@ def run_full_fetch():
     init_advanced_tables()
 
     results = {
-        'team_stats': fetch_team_stats(),
-        'schedule':   fetch_schedule_context(days_ahead=4),
+        'team_stats':       fetch_team_stats(),
+        'player_advanced':  fetch_player_advanced(),
+        'schedule':         fetch_schedule_context(days_ahead=4),
     }
 
     log.info(f"[AdvFetcher] Complete: {results}")

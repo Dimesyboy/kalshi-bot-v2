@@ -146,12 +146,95 @@ class PropRouterStrategy(BaseStrategy):
             )
 
         elif TWOLEG_CONF_MIN <= conf < SINGLE_CONF_MIN and edge >= TWOLEG_EDGE_MIN:
-            # Two-leg candidate — log for combo scanner, skip single placement
-            log.debug(f"[Router] TWO-LEG candidate (combo only): {player} {thr}+ {stat} "
-                     f"conf={conf:.2f} edge={edge:+.2f}")
+            # Two-leg candidate — accumulate and try to pair
+            player_key = f"{player}_{stat}"
+            if player_key in self._traded_players:
+                return None
+
+            self._pending_twoleg.append({
+                'ticker':    ticker,
+                'conf':      conf,
+                'edge':      edge,
+                'hit_rate':  hit_rate,
+                'yes_price': yes_price,
+                'player':    player,
+                'stat':      stat,
+                'thr':       thr,
+                'reasoning': reasoning,
+            })
+            log.debug(f"[Router] TWO-LEG queued: {player} {thr}+ {stat} "
+                     f"conf={conf:.2f} ({len(self._pending_twoleg)} pending)")
+
+            # Try to pair and submit via RFQ
+            if len(self._pending_twoleg) >= 2:
+                self._try_submit_twoleg()
+
             return None
 
         return None
+
+    def _try_submit_twoleg(self):
+        """Try to form and submit a two-leg RFQ from pending candidates."""
+        # Sort by edge, pick best two from different players
+        candidates = sorted(self._pending_twoleg, key=lambda x: x['edge'], reverse=True)
+        leg1 = candidates[0]
+        leg2 = next((c for c in candidates[1:] if c['player'] != leg1['player']), None)
+        if not leg2:
+            return
+
+        pair_key = tuple(sorted([leg1['ticker'], leg2['ticker']]))
+        if pair_key in self._twoleg_placed:
+            return
+        self._twoleg_placed.add(pair_key)
+
+        # Mark players as traded
+        self._traded_players.add(f"{leg1['player']}_{leg1['stat']}")
+        self._traded_players.add(f"{leg2['player']}_{leg2['stat']}")
+        self._pending_twoleg = [c for c in self._pending_twoleg
+                                if c['ticker'] not in (leg1['ticker'], leg2['ticker'])]
+
+        combined_conf = round(leg1['conf'] * leg2['conf'], 3)
+        cost          = (leg1['yes_price'] / 100) * (leg2['yes_price'] / 100)
+        payout        = round(1 / cost, 2) if cost > 0 else 0
+
+        log.info(f"[Router] TWO-LEG submitting: "
+                f"{leg1['player']} {leg1['thr']}+ {leg1['stat']} + "
+                f"{leg2['player']} {leg2['thr']}+ {leg2['stat']} | "
+                f"conf={combined_conf:.2f} payout={payout:.1f}x stake=$3")
+
+        try:
+            from combo_scanner import ComboLeg, ComboCandidate, submit_rfq, _log_combo_trade
+            legs = [
+                ComboLeg(ticker=leg1['ticker'],
+                         collection_ticker='KXMVESPORTSMULTIGAMEEXTENDED-R',
+                         confidence=leg1['conf'],
+                         implied_prob=leg1['yes_price']/100,
+                         is_yes_only=True,
+                         reasoning=leg1['reasoning']),
+                ComboLeg(ticker=leg2['ticker'],
+                         collection_ticker='KXMVESPORTSMULTIGAMEEXTENDED-R',
+                         confidence=leg2['conf'],
+                         implied_prob=leg2['yes_price']/100,
+                         is_yes_only=True,
+                         reasoning=leg2['reasoning']),
+            ]
+            candidate = ComboCandidate('KXMVESPORTSMULTIGAMEEXTENDED-R', legs)
+
+            # Only submit if payout >= 1.3x (min useful combo payout)
+            if candidate.expected_payout < 1.3:
+                log.info(f"[Router] TWO-LEG payout {payout:.1f}x too low, skipping")
+                return
+
+            quote = submit_rfq(candidate, stake_dollars=3.0)
+            if quote:
+                _log_combo_trade(candidate, quote, mode='twoleg')
+                eff = quote.get('_effective_yes', 0)
+                actual_payout = round(3.0 / eff, 1) if eff > 0 else 0
+                log.info(f"[Router] TWO-LEG executed @ {eff:.2f} → ${actual_payout:.0f} payout")
+            else:
+                log.info(f"[Router] TWO-LEG no quote — legs remain available for combos")
+        except Exception as e:
+            log.warning(f"[Router] TWO-LEG submit failed: {e}")
 
     def _try_place_twoleg(self, context) -> Optional[TradeSignal]:
         """

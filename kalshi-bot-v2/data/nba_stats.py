@@ -345,6 +345,8 @@ def score_prop_leg(ticker: str) -> dict:
     # ── Hit rate from last 10 games (primary signal) ──────────────────
     hit_rate   = 0.0
     recent_avg = 0.0
+    trajectory = 0.0
+    hit_rate_3 = 0.0
     espn_id2   = avgs.get("espn_id", "")
     stat_key   = {"KXNBAPTS":"pts","KXNBAREB":"reb","KXNBAAST":"ast",
                   "KXNBASTL":"stl","KXNBABLK":"blk","KXNBA3PT":"threes"}.get(series,"pts")
@@ -352,6 +354,12 @@ def score_prop_leg(ticker: str) -> dict:
         try:
             from data.player_stats import get_hit_rate as _hit_rate, get_recent_avg as _recent_avg
             hit_rate   = _hit_rate(espn_id2, stat_key, threshold, n=10)
+            # Recent form trajectory — last 3 vs last 10
+            hit_rate_3  = _hit_rate(espn_id2, stat_key, threshold, n=3)
+            avg_last_3  = _recent_avg(espn_id2, stat_key, n=3)
+            avg_last_10 = _recent_avg(espn_id2, stat_key, n=10)
+            # Trajectory: positive = improving, negative = declining
+            trajectory  = (avg_last_3 - avg_last_10) / max(avg_last_10, 0.1)
             recent_avg = _recent_avg(espn_id2, stat_key, n=5)
         except Exception:
             pass
@@ -427,7 +435,24 @@ def score_prop_leg(ticker: str) -> dict:
         b2b_adj      = -0.06 if ctx.get('is_b2b_road') else -0.03 if ctx.get('is_b2b') else 0.0
         home_adj     = 0.02 if ctx.get('is_home') else -0.01
 
-        context_adj  = pace_adj + matchup_adj + b2b_adj + home_adj
+        # 5. Usage adjustment
+        usg_adj = 0.0
+        try:
+            from data.advanced_fetcher import get_player_usg as _gusg
+            _usg    = _gusg(avgs.get("player_name",""))
+            usg_adj = round(max(-0.03, min(0.05, (_usg - 0.20) * 0.3)), 3)
+        except Exception:
+            pass
+
+        # 6. Trajectory adjustment
+        traj_adj = 0.0
+        try:
+            if abs(trajectory) > 0.15:
+                traj_adj = round(max(-0.06, min(0.06, trajectory * 0.20)), 3)
+        except Exception:
+            pass
+
+        context_adj  = pace_adj + matchup_adj + b2b_adj + home_adj + usg_adj + traj_adj
         confidence   = round(max(0.0, min(1.0, confidence + context_adj)), 4)
 
         ctx_parts = []
@@ -435,6 +460,8 @@ def score_prop_leg(ticker: str) -> dict:
         if abs(matchup_adj) >= 0.01: ctx_parts.append(f"matchup{matchup_adj:+.2f}")
         if b2b_adj != 0:             ctx_parts.append(f"b2b{b2b_adj:+.2f}")
         if home_adj != 0:            ctx_parts.append(f"loc{home_adj:+.2f}")
+        if abs(usg_adj)     >= 0.01: ctx_parts.append(f"usg{usg_adj:+.2f}")
+        if abs(traj_adj)    >= 0.01: ctx_parts.append(f"traj{traj_adj:+.2f}")
         if ctx_parts:
             reason += f" [{','.join(ctx_parts)}]"
 
