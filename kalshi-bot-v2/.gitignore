@@ -41,3 +41,5 @@ open_positions.json
 cooldowns.json
 data/cache.db
 data/positions.db
+.git-credentials
+*.git-credentials
