@@ -74,5 +74,24 @@
     "market_status": "active",
     "is_bot": true,
     "client_order_id": ""
+  },
+  "6925318e-2e5b-4e84-aec6-2a531c38cd4a": {
+    "order_id": "6925318e-2e5b-4e84-aec6-2a531c38cd4a",
+    "ticker": "KXNBAPTS-26MAR31CHABKN-CHAMBRIDGES0-10",
+    "event_ticker": "KXNBAPTS-26MAR31CHABKN",
+    "side": "yes",
+    "strategy": "single_prop",
+    "reason": "Miles Bridges 10+ pts | conf=1.00 edge=+0.25 hr=100% [SINGLE]",
+    "confidence": 0.996,
+    "entry_price": 75,
+    "contracts": 1,
+    "filled": 0,
+    "entry_fee": 0.01,
+    "state": "pending",
+    "placed_time": "2026-03-31T02:10:59.685680+00:00",
+    "close_time": "2026-04-14T23:30:00Z",
+    "market_status": "active",
+    "is_bot": true,
+    "client_order_id": ""
   }
 }
