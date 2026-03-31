@@ -379,6 +379,8 @@ def submit_rfq(candidate: ComboCandidate,
                 quote = max(valid_q, key=lambda q: q['_effective_yes'])
                 eff   = quote['_effective_yes']
                 log.info(f"[Combo] Best quote: effective_yes={eff:.4f} contracts={quote.get('no_contracts_fp') or quote.get('yes_contracts_fp')}")
+                log.info(f"[Combo] Raw quote keys: {list(quote.keys())}")
+                log.info(f"[Combo] yes_bid={quote.get('yes_bid_dollars')} no_bid={quote.get('no_bid_dollars')} yes_contracts={quote.get('yes_contracts_fp')} no_contracts={quote.get('no_contracts_fp')} taker_cost={quote.get('taker_cost_dollars')} maker_revenue={quote.get('maker_revenue_dollars')}")
                 break
         except Exception as e:
             log.debug(f"[Combo] Poll error: {e}")
@@ -402,8 +404,13 @@ def submit_rfq(candidate: ComboCandidate,
         log.info(f"[Combo] Quote rejected — payout {actual_payout:.1f}x below {min_payout}x minimum")
         return None
 
-    if ev <= 0:
-        log.info(f"[Combo] Quote rejected — negative EV")
+    # EV check — audit shows combos are underconfident by ~33%
+    # Apply calibration correction: boost combined_conf by 33% for EV calc
+    calibrated_conf = min(0.95, candidate.combined_confidence * 1.33)
+    ev_calibrated   = _evaluate_quote_with_conf(candidate, yes_bid, stake_dollars, calibrated_conf)
+    log.info(f"[Combo] EV raw={ev:+.3f} calibrated={ev_calibrated:+.3f} (conf boost 33%)")
+    if ev_calibrated <= 0:
+        log.info(f"[Combo] Quote rejected — negative EV after calibration")
         return None
 
     # ── Step 4: Accept (confirm is automatic) ─────────────────────────
@@ -417,6 +424,37 @@ def submit_rfq(candidate: ComboCandidate,
         )
         if r_accept.status_code in (200, 204):
             log.info(f"[Combo] Quote accepted and auto-confirmed: {quote_id}")
+            # Record to positions DB
+            try:
+                from data.positions_db import record_order, record_fill
+                legs_str = ' + '.join([l.ticker.split('-')[-2] for l in candidate.legs[:3]])
+                record_order(
+                    order_id        = quote_id,
+                    client_order_id = quote_id,
+                    ticker          = quote.get('market_ticker', ''),
+                    strategy        = f'combo_{best_side}',
+                    side            = best_side,
+                    price_cents     = int(best_price * 100),
+                    contracts       = int(best_contracts),
+                    source          = 'bot',
+                )
+                record_fill(
+                    ticker          = quote.get('market_ticker', ''),
+                    order_id        = quote_id,
+                    client_order_id = quote_id,
+                    side            = best_side,
+                    qty             = int(best_contracts),
+                    fill_price      = int(best_price * 100),
+                    source          = 'bot',
+                    strategy        = f'combo_{best_side}',
+                    confidence      = candidate.combined_confidence,
+                    edge            = 0.0,
+                    hit_rate        = 0.0,
+                    reason          = f'{len(candidate.legs)}-leg combo {best_side} @ {best_price:.3f} payout={quote.get("_payout",0):.1f}x',
+                )
+                log.info(f"[Combo] Recorded to positions DB")
+            except Exception as _dbe:
+                log.debug(f"[Combo] DB record failed: {_dbe}")
             return quote
         else:
             log.warning(f"[Combo] Accept failed: {r_accept.status_code} {r_accept.text[:100]}")
@@ -424,6 +462,18 @@ def submit_rfq(candidate: ComboCandidate,
     except Exception as e:
         log.error(f"[Combo] Accept failed: {e}")
         return None
+
+
+def _evaluate_quote_with_conf(candidate: ComboCandidate,
+                              quoted_price: float,
+                              stake: float,
+                              override_conf: float) -> float:
+    """EV calc with overridden confidence (for calibration correction)."""
+    if quoted_price <= 0:
+        return -1.0
+    payout = stake / quoted_price
+    ev     = override_conf * (payout - stake) - (1 - override_conf) * stake
+    return round(ev, 4)
 
 
 def _evaluate_quote(candidate: ComboCandidate,

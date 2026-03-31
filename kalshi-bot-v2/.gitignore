@@ -25,3 +25,19 @@ data/*.csv
 # Temp
 *.tmp
 .DS_Store
+*.db
+*.db-shm
+*.db-wal
+data/*.db
+data/*.json
+*.log
+.env
+keys/
+__pycache__/
+*.pyc
+bot_orders.json
+pending_orders.json
+open_positions.json
+cooldowns.json
+data/cache.db
+data/positions.db
